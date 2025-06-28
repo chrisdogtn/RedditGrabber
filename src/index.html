@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="script-src 'self' 'unsafe-inline';"
+    />
+    <title>Reddit Media Downloader</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-container">
+      <div class="sidebar">
+        <h1 class="app-title">Reddit Downloader</h1>
+
+        <h2 class="section-title">Add Subreddits</h2>
+        <div class="add-panel glass-panel">
+          <textarea
+            id="subreddit-textarea"
+            placeholder="Enter one subreddit URL per line..."
+          ></textarea>
+          <div class="add-panel-actions">
+            <button id="add-from-text-btn">Add from Text</button>
+            <button id="load-from-file-btn">Load from File...</button>
+          </div>
+        </div>
+
+        <h2 class="section-title">Queue</h2>
+        <ul id="subreddit-list" class="glass-panel"></ul>
+
+        <div class="queue-actions">
+          <button id="clear-completed-btn" class="sidebar-btn">
+            Clear Completed
+          </button>
+          <button id="clear-queue-btn" class="sidebar-btn danger">
+            Clear All
+          </button>
+        </div>
+
+        <h2 class="section-title">Options</h2>
+        <div class="options-area glass-panel">
+          <fieldset>
+            <legend>File Types</legend>
+            <div class="checkbox-group-horizontal">
+              <div class="checkbox-group">
+                <input type="checkbox" id="type-images" checked />
+                <label for="type-images">Images</label>
+              </div>
+              <div class="checkbox-group">
+                <input type="checkbox" id="type-gifs" checked />
+                <label for="type-gifs">GIFs</label>
+              </div>
+              <div class="checkbox-group">
+                <input type="checkbox" id="type-videos" checked />
+                <label for="type-videos">Videos</label>
+              </div>
+            </div>
+          </fieldset>
+          <fieldset>
+            <legend>Limits</legend>
+            <label for="limit-posts">Max Posts to Scan</label>
+            <input type="number" id="limit-posts" placeholder="No limit" />
+            <label for="limit-pages">Page Range</label>
+            <div class="range-group">
+              <input
+                type="number"
+                id="page-start"
+                placeholder="Start"
+                min="1"
+              />
+              <span>-</span>
+              <input type="number" id="page-end" placeholder="End" min="1" />
+            </div>
+          </fieldset>
+        </div>
+      </div>
+
+      <div class="main-content">
+        <div class="download-path-container glass-panel">
+          <div class="path-info">
+            <span class="section-title">Download Location</span>
+            <span id="download-path-display">Not set</span>
+          </div>
+          <button id="set-path-btn">Choose Folder</button>
+        </div>
+
+        <button id="start-btn">Start Direct Download</button>
+
+        <div id="progress-container" class="glass-panel hidden">
+          <div class="progress-text">
+            <span id="progress-label">Downloading...</span>
+            <span id="progress-value">0%</span>
+          </div>
+          <div class="progress-bar-background">
+            <div id="progress-bar-foreground"></div>
+          </div>
+        </div>
+
+        <h2 class="section-title">Log</h2>
+        <div id="log-area" class="glass-panel"></div>
+
+        <div id="notification" class="hidden">
+          <p id="notification-message"></p>
+          <button id="close-notification-btn" class="sidebar-btn">Close</button>
+          <button id="restart-btn" class="hidden">Restart to Update</button>
+        </div>
+      </div>
+    </div>
+    <script src="renderer.js"></script>
+  </body>
+</html>

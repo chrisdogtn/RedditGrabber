@@ -1,0 +1,390 @@
+/* ===== Base & Typography ===== */
+:root {
+  --color-background: #121212;
+  --color-panel-background: rgba(38, 38, 38, 0.5);
+  --color-border: rgba(255, 255, 255, 0.1);
+  --color-primary: #00f5d4; /* Vibrant Teal/Cyan */
+  --color-primary-hover: #00e0c3;
+  --color-text-primary: #e0e0e0;
+  --color-text-secondary: #888888;
+  --font-family: "Inter", sans-serif;
+}
+
+body {
+  font-family: var(--font-family);
+  background-color: var(--color-background);
+  color: var(--color-text-primary);
+  margin: 0;
+  overflow: hidden;
+}
+
+h1,
+h2,
+h3 {
+  font-weight: 700;
+}
+
+.section-title {
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  font-size: 0.8rem;
+  letter-spacing: 1px;
+  margin: 24px 0 8px 0;
+}
+
+/* ===== Layout ===== */
+.app-container {
+  display: flex;
+  height: 100vh;
+}
+.sidebar {
+  width: 400px;
+  padding: 24px;
+  border-right: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+}
+.main-content {
+  flex-grow: 1;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+}
+.main-content > *,
+h2.section-title {
+  max-width: 800px;
+  width: 100%;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* ===== Glassmorphism Panel ===== */
+.glass-panel {
+  background: var(--color-panel-background);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+/* ===== Sidebar Components ===== */
+.app-title {
+  margin: 0 0 24px 0;
+  font-size: 1.8rem;
+  color: var(--color-primary);
+}
+
+.add-panel textarea {
+  width: 100%;
+  min-height: 80px;
+  background-color: var(--color-background);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 10px;
+  font-family: monospace;
+  font-size: 0.9rem;
+  box-sizing: border-box;
+  resize: vertical;
+}
+.add-panel-actions {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 12px;
+}
+.add-panel-actions button {
+  width: 48%;
+}
+
+input[type="number"] {
+  flex-grow: 1;
+  padding: 10px;
+  border: 1px solid var(--color-border);
+  background-color: transparent;
+  color: var(--color-text-primary);
+  border-radius: 8px;
+  font-family: var(--font-family);
+  font-size: 0.9rem;
+  outline: none;
+  transition: border-color 0.2s;
+  width: 100%;
+  box-sizing: border-box;
+}
+input[type="number"]:focus {
+  border-color: var(--color-primary);
+}
+
+button {
+  padding: 10px 16px;
+  border: none;
+  background-color: var(--color-primary);
+  color: #000;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 700;
+  transition: background-color 0.2s, opacity 0.2s;
+}
+button:hover {
+  background-color: var(--color-primary-hover);
+}
+button.danger {
+  background-color: #ff3b30;
+  color: white;
+}
+button.danger:hover {
+  background-color: #e02a1a;
+}
+
+.sidebar-btn {
+  padding: 8px 12px;
+  font-size: 0.8rem;
+  background-color: var(--color-border);
+  color: var(--color-text-secondary);
+  flex-grow: 1;
+}
+.sidebar-btn:hover {
+  background-color: #333;
+  color: var(--color-text-primary);
+}
+
+#subreddit-list {
+  list-style-type: none;
+  padding: 8px;
+  margin: 0;
+  flex-grow: 1;
+  min-height: 120px;
+  overflow-y: auto;
+  position: relative;
+  transition: all 0.2s;
+}
+#subreddit-list:empty::before {
+  content: "Your queue is empty.";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: var(--color-text-secondary);
+  font-style: italic;
+  font-size: 0.9rem;
+}
+#subreddit-list li {
+  background-color: rgba(255, 255, 255, 0.05);
+  padding: 12px 16px;
+  margin-bottom: 8px;
+  border-radius: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.9rem;
+  border-left: 3px solid transparent;
+  transition: all 0.2s;
+}
+#subreddit-list li .item-url {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-right: 16px;
+}
+#subreddit-list li .item-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+#subreddit-list li .trash-icon {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.2s;
+  flex-shrink: 0;
+}
+#subreddit-list li .trash-icon:hover {
+  opacity: 1;
+}
+#subreddit-list li.item-complete {
+  border-left: 3px solid var(--color-primary);
+  color: var(--color-text-secondary);
+}
+#subreddit-list li.item-complete .item-url {
+  text-decoration: line-through;
+}
+#subreddit-list li .check-icon {
+  width: 20px;
+  height: 20px;
+  color: var(--color-primary);
+  flex-shrink: 0;
+}
+
+.queue-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 12px;
+}
+.options-area fieldset {
+  border: none;
+  padding: 0;
+  margin: 0 0 16px 0;
+}
+.options-area fieldset:last-child {
+  margin-bottom: 0;
+}
+.options-area legend {
+  font-weight: 500;
+  padding: 0 0 8px 0;
+  font-size: 0.9rem;
+}
+
+.checkbox-group-horizontal {
+  display: flex;
+  justify-content: space-around;
+}
+.checkbox-group {
+  display: flex;
+  align-items: center;
+}
+.checkbox-group label {
+  font-size: 0.9rem;
+  color: var(--color-text-secondary);
+  margin-left: 8px;
+}
+
+.range-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.range-group input[type="number"] {
+  min-width: 0;
+}
+
+/* ===== Main Content Components ===== */
+.download-path-container {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+  padding: 12px 16px;
+}
+.path-info {
+  display: flex;
+  flex-direction: column;
+}
+#download-path-display {
+  color: var(--color-text-primary);
+  font-family: monospace;
+  font-size: 0.9rem;
+}
+#set-path-btn {
+  flex-shrink: 0;
+  margin-left: 16px;
+}
+
+#start-btn {
+  padding: 16px;
+  font-size: 1.1rem;
+}
+
+#progress-container {
+  padding: 16px;
+  margin-top: 24px;
+}
+.hidden {
+  display: none !important;
+}
+.progress-text {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.9rem;
+  margin-bottom: 8px;
+}
+#progress-label {
+  color: var(--color-text-secondary);
+}
+#progress-value {
+  font-weight: 700;
+}
+.progress-bar-background {
+  width: 100%;
+  height: 8px;
+  background-color: rgba(0, 0, 0, 0.3);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.progress-bar-foreground {
+  height: 100%;
+  width: 0%;
+  background-color: var(--color-primary);
+  border-radius: 4px;
+  transition: width 0.2s ease-out;
+}
+
+#log-area {
+  flex-grow: 1;
+  overflow-y: auto;
+  font-size: 0.85rem;
+  line-height: 1.6;
+  padding: 8px 16px;
+}
+.log-message {
+  padding: 2px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+.log-message:last-child {
+  border-bottom: none;
+}
+.log-message.log-success {
+  color: #34c759;
+}
+.log-message.log-error {
+  color: #ff3b30;
+  font-weight: 700;
+}
+.log-message.log-auth {
+  color: #ff9500;
+}
+.log-message.log-info {
+  color: var(--color-text-secondary);
+}
+
+/* ===== Notifications ===== */
+#notification {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background-color: #333;
+  color: white;
+  padding: 16px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+#notification p {
+  margin: 0;
+}
+#restart-btn {
+  background-color: var(--color-primary);
+  color: #000;
+}
+
+/* ===== Custom Scrollbar ===== */
+::-webkit-scrollbar {
+  width: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #555;
+  background-clip: content-box;
+}
