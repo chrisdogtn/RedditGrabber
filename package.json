@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "Downloads media from subreddits.",
   "main": "src/main.js",
+  "files": [
+    "src/**/*"
+  ],
   "scripts": {
     "start": "electron .",
     "pack": "electron-builder --dir",
@@ -26,6 +29,9 @@
   "build": {
     "appId": "com.gbs.redditdownloader",
     "productName": "Reddit Media Downloader",
+    "files": [
+      "src/**/*"
+    ],
     "publish": {
       "provider": "github",
       "owner": "chrisdogtn",
