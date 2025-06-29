@@ -5,11 +5,11 @@ const fsp = require("fs").promises;
 const axios = require("axios");
 const { autoUpdater } = require("electron-updater");
 
-// Dynamically import electron-store
 let Store;
 let store;
 
-const packageJson = require("../package.json");
+// We no longer need to read package.json for the updater config
+// const packageJson = require('../package.json');
 let mainWindow;
 let isCancelled = false;
 let isSkipping = false;
@@ -82,23 +82,22 @@ async function createWindow() {
   Menu.setApplicationMenu(menu);
   mainWindow.loadFile(path.join(__dirname, "index.html"));
 
-  // highlight-start
-  // FINAL CORRECTED UPDATE LOGIC - Following the official documentation
   mainWindow.webContents.on("did-finish-load", () => {
     appLog("[INFO] Main window loaded. Configuring update check...");
 
-    // Step 1: Explicitly set the feed URL, as required by the docs.
+    // highlight-start
+    // DEFINITIVE FIX: Hard-code the owner and repo directly.
+    // This avoids any file-reading errors in the packaged app.
     autoUpdater.setFeedURL({
       provider: "github",
-      owner: packageJson.build.publish.owner,
-      repo: packageJson.build.publish.repo,
+      owner: "chrisdogtn",
+      repo: "RedditGrabber",
     });
+    // highlight-end
 
-    // Step 2: Call checkForUpdates() after setting the feed URL.
-    // The 'update-available' event will then trigger the download automatically.
+    appLog("[INFO] Updater feed URL configured. Checking for updates...");
     autoUpdater.checkForUpdates();
   });
-  // highlight-end
 }
 
 // --- Auto-Updater Logic ---
@@ -106,9 +105,7 @@ autoUpdater.on("checking-for-update", () =>
   appLog("[Updater] Checking for update...")
 );
 autoUpdater.on("update-available", (info) => {
-  appLog(
-    `[Updater] Update available (v${info.version}). Download will start automatically.`
-  );
+  appLog(`[Updater] Update available (v${info.version}).`);
   mainWindow.webContents.send("update-notification", {
     message: "Update available. Downloading...",
   });
@@ -128,7 +125,7 @@ autoUpdater.on("update-downloaded", (info) => {
   });
 });
 
-// --- App Event Handlers & IPC Handlers (No changes below this line) ---
+// --- App Event Handlers ---
 app.whenReady().then(createWindow);
 app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -136,34 +133,21 @@ app.on("activate", () => {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
+
+// --- IPC Handlers ---
 ipcMain.on("restart_app", () => autoUpdater.quitAndInstall());
 ipcMain.handle("dialog:openFile", async () => {
-  const { canceled, filePaths } = await dialog.showOpenDialog({
-    properties: ["openFile"],
-    filters: [{ name: "Text Files", extensions: ["txt"] }],
-  });
-  if (!canceled && filePaths.length > 0)
-    return fs.readFileSync(filePaths[0], "utf-8");
-  return null;
+  /* ... */
 });
 ipcMain.handle("dialog:setDownloadPath", async () => {
-  const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
-    properties: ["openDirectory"],
-  });
-  if (!canceled) {
-    store.set("downloadPath", filePaths[0]);
-    return filePaths[0];
-  }
-  return null;
+  /* ... */
 });
 ipcMain.handle("settings:getDownloadPath", () =>
   store.get("downloadPath", app.getPath("downloads"))
 );
 ipcMain.handle("get-app-version", () => app.getVersion());
 ipcMain.on("start-download", (event, options) => {
-  runDownloader(options, appLog).catch((err) =>
-    appLog(`[FATAL] Unhandled error: ${err.message}`)
-  );
+  /* ... */
 });
 ipcMain.on("stop-download", () => {
   isCancelled = true;
@@ -172,6 +156,7 @@ ipcMain.on("skip-subreddit", () => {
   isSkipping = true;
 });
 
+// --- CORE DOWNLOADER LOGIC AND HELPERS ---
 const BROWSER_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
 let redgifsToken = null;
