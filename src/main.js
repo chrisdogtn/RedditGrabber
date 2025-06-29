@@ -5,6 +5,12 @@ const fsp = require("fs").promises;
 const axios = require("axios");
 const { autoUpdater } = require("electron-updater");
 
+// Add electron-log for better update logging
+const log = require("electron-log");
+autoUpdater.logger = log;
+autoUpdater.logger.transports.file.level = "info";
+
+// Dynamically import electron-store
 let Store;
 let store;
 
@@ -51,10 +57,10 @@ async function createWindow() {
   store = new Store();
 
   mainWindow = new BrowserWindow({
-    width: 1000,
-    height: 1000,
-    minWidth: 1000,
-    minHeight: 945,
+    width: 1400,
+    height: 1200,
+    minWidth: 1400,
+    minHeight: 1200,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -72,28 +78,66 @@ async function createWindow() {
   });
 }
 
-autoUpdater.on("update-available", () => {
-  if (mainWindow)
-    mainWindow.webContents.send("update-notification", {
-      message: "Update available. Downloading...",
-    });
+// --- Auto-Updater Logic ---
+function sendUpdateLog(message) {
+  log.info(`[Updater] ${message}`);
+  if (mainWindow) {
+    mainWindow.webContents.send("log-update", `[Updater] ${message}`);
+  }
+}
+
+autoUpdater.on("checking-for-update", () => {
+  sendUpdateLog("Checking for update...");
 });
-autoUpdater.on("update-downloaded", () => {
-  if (mainWindow)
-    mainWindow.webContents.send("update-notification", {
-      message: "Update downloaded. Restart to install.",
-      showRestart: true,
-    });
+autoUpdater.on("update-available", (info) => {
+  sendUpdateLog(`Update available (v${info.version}).`);
+  mainWindow.webContents.send("update-notification", {
+    message: "Update available. Downloading...",
+  });
 });
-ipcMain.on("restart_app", () => {
-  autoUpdater.quitAndInstall();
+autoUpdater.on("update-not-available", (info) => {
+  sendUpdateLog("You are on the latest version.");
 });
+autoUpdater.on("error", (err) => {
+  sendUpdateLog(`Error in auto-updater: ${err.toString()}`);
+});
+autoUpdater.on("download-progress", (progressObj) => {
+  let log_message = `Download speed: ${Math.round(
+    progressObj.bytesPerSecond / 1024
+  )} KB/s`;
+  log_message =
+    log_message + " - Downloaded " + Math.round(progressObj.percent) + "%";
+  log_message =
+    log_message +
+    " (" +
+    Math.round(progressObj.transferred / 1024 / 1024) +
+    "/" +
+    Math.round(progressObj.total / 1024 / 1024) +
+    " MB)";
+  sendUpdateLog(log_message);
+});
+autoUpdater.on("update-downloaded", (info) => {
+  sendUpdateLog(
+    `Update v${info.version} downloaded. It will be installed on restart.`
+  );
+  mainWindow.webContents.send("update-notification", {
+    message: "Update downloaded. Restart to install.",
+    showRestart: true,
+  });
+});
+
+// --- App Event Handlers ---
 app.whenReady().then(createWindow);
 app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow();
 });
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
+});
+
+// --- IPC Handlers ---
+ipcMain.on("restart_app", () => {
+  autoUpdater.quitAndInstall();
 });
 ipcMain.handle("dialog:openFile", async () => {
   const { canceled, filePaths } = await dialog.showOpenDialog({
@@ -117,12 +161,15 @@ ipcMain.handle("dialog:setDownloadPath", async () => {
 ipcMain.handle("settings:getDownloadPath", () =>
   store.get("downloadPath", app.getPath("downloads"))
 );
+ipcMain.handle("get-app-version", () => {
+  return app.getVersion();
+});
 ipcMain.on("start-download", (event, options) => {
-  const log = (message) => {
+  const logUpdater = (message) => {
     if (mainWindow) mainWindow.webContents.send("log-update", message);
   };
-  runDownloader(options, log).catch((err) =>
-    log(`[FATAL] Unhandled error: ${err.message}`)
+  runDownloader(options, logUpdater).catch((err) =>
+    logUpdater(`[FATAL] Unhandled error in downloader: ${err.message}`)
   );
 });
 ipcMain.on("stop-download", () => {
@@ -132,6 +179,7 @@ ipcMain.on("skip-subreddit", () => {
   isSkipping = true;
 });
 
+// --- CORE DOWNLOADER LOGIC ---
 const BROWSER_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
 let redgifsToken = null;
@@ -378,6 +426,22 @@ async function scrapeImgurAlbum(albumUrl, log) {
   return images;
 }
 
+async function scrapeXhamsterPage(pageUrl) {
+  try {
+    const response = await axios.get(pageUrl, {
+      headers: { "User-Agent": BROWSER_USER_AGENT },
+    });
+    const html = response.data;
+    const match = html.match(/'video_url'\s*:\s*'([^']+)'/);
+    if (match && match[1]) {
+      return JSON.parse(`"${match[1]}"`);
+    }
+  } catch (error) {
+    /* Fails silently */
+  }
+  return null;
+}
+
 async function extractMediaUrlsFromPost(
   originalPostData,
   log,
@@ -396,8 +460,11 @@ async function extractMediaUrlsFromPost(
     is_gallery,
     media_metadata,
   } = postData;
-  const SCRAPEABLE_HOSTS = ["imgur.com", "tumblr.com"];
+
   try {
+    if (postUrl.includes("/comments/")) {
+      return urls;
+    }
     if (domain === "v.redd.it" || is_video) {
       if (secure_media?.reddit_video)
         urls.push({
@@ -418,7 +485,7 @@ async function extractMediaUrlsFromPost(
             title: postTitle,
           });
       });
-    } else if (domain === "redgifs.com") {
+    } else if (domain.includes("redgifs.com")) {
       const token = await getRedgifsToken(log);
       if (token) {
         const slug = postUrl.split("/").pop();
@@ -439,6 +506,41 @@ async function extractMediaUrlsFromPost(
               title: postTitle,
             });
         }
+      }
+    } else if (domain.includes("imgur.com")) {
+      if (postUrl.includes("/a/") || postUrl.includes("/gallery/")) {
+        const albumImages = await scrapeImgurAlbum(postUrl, log);
+        albumImages.forEach((imageUrl, i) => {
+          urls.push({
+            url: imageUrl,
+            type: "image",
+            id: `${postId}_${i}`,
+            title: postTitle,
+          });
+        });
+      } else {
+        const directUrl =
+          postUrl.endsWith(".jpg") || postUrl.endsWith(".png")
+            ? postUrl
+            : `${postUrl}.jpg`;
+        urls.push({
+          url: directUrl,
+          type: "image",
+          id: postId,
+          title: postTitle,
+        });
+      }
+    } else if (domain.includes("xhamster.com")) {
+      log(`[INFO] Probing xhamster page for video...`);
+      const directVideoUrl = await scrapeXhamsterPage(postUrl);
+      if (directVideoUrl) {
+        log(`[SUCCESS] Found xhamster video link.`);
+        urls.push({
+          url: directVideoUrl,
+          type: "video",
+          id: postId,
+          title: postTitle,
+        });
       }
     } else {
       const extension = path.extname(new URL(postUrl).pathname).toLowerCase();
@@ -468,36 +570,6 @@ async function extractMediaUrlsFromPost(
           id: postId,
           title: postTitle,
         });
-      } else if (SCRAPEABLE_HOSTS.some((host) => domain.includes(host))) {
-        if (
-          domain.includes("imgur.com") &&
-          (postUrl.includes("/a/") || postUrl.includes("/gallery/"))
-        ) {
-          const albumImages = await scrapeImgurAlbum(postUrl, log);
-          albumImages.forEach((imageUrl, i) => {
-            urls.push({
-              url: imageUrl,
-              type: "image",
-              id: `${postId}_${i}`,
-              title: postTitle,
-            });
-          });
-        } else {
-          const directMediaUrl = await scrapePageForMedia(postUrl);
-          if (directMediaUrl) {
-            const mediaType =
-              path.extname(new URL(directMediaUrl).pathname).toLowerCase() ===
-              ".mp4"
-                ? "video"
-                : "image";
-            urls.push({
-              url: directMediaUrl,
-              type: mediaType,
-              id: postId,
-              title: postTitle,
-            });
-          }
-        }
       } else {
         fs.appendFileSync(unhandledLogPath, `${postUrl}\n`);
       }
