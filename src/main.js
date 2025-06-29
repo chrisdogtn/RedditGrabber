@@ -1,12 +1,9 @@
-const { app, BrowserWindow, ipcMain, dialog, Menu, net } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, Menu } = require("electron");
 const fs = require("fs");
 const path = require("path");
 const fsp = require("fs").promises;
 const axios = require("axios");
 const { autoUpdater } = require("electron-updater");
-
-// Load .env file for the GH_TOKEN
-require("dotenv").config();
 
 // Dynamically import electron-store
 let Store;
@@ -16,31 +13,14 @@ let mainWindow;
 let isCancelled = false;
 let isSkipping = false;
 
-// --- Built-in Logging System ---
-let logFilePath;
-function initializeLog(logPath) {
-  try {
-    logFilePath = path.join(logPath, "app_log.log");
-    const header = `--- Log session started at ${new Date().toISOString()} ---\n`;
-    fs.writeFileSync(logFilePath, header);
-  } catch (error) {
-    console.error("Failed to initialize log file:", error);
-  }
-}
+// Simplified logging for the UI
 function appLog(message) {
   if (mainWindow) {
     mainWindow.webContents.send("log-update", message);
   }
-  if (logFilePath) {
-    fs.appendFileSync(
-      logFilePath,
-      `[${new Date().toISOString()}] ${message}\n`
-    );
-  }
   console.log(message);
 }
 
-// --- CUSTOM APPLICATION MENU ---
 const menuTemplate = [
   { label: "File", submenu: [{ role: "quit" }] },
   {
@@ -52,8 +32,7 @@ const menuTemplate = [
           dialog.showMessageBox(mainWindow, {
             type: "info",
             title: `About ${app.getName()}`,
-            message: `Version: ${app.getVersion()}\nAuthor: chrisdogtn`,
-            detail: "A simple application to download media from subreddits.",
+            message: `Version: ${app.getVersion()}`,
           });
         },
       },
@@ -65,7 +44,7 @@ async function createWindow() {
   const { default: StoreClass } = await import("electron-store");
   Store = StoreClass;
   store = new Store();
-  initializeLog(app.getPath("userData"));
+
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 1200,
@@ -77,34 +56,24 @@ async function createWindow() {
       nodeIntegration: false,
     },
   });
+
   const menu = Menu.buildFromTemplate(menuTemplate);
   Menu.setApplicationMenu(menu);
+
   mainWindow.loadFile(path.join(__dirname, "index.html"));
 
   mainWindow.webContents.on("did-finish-load", () => {
-    appLog(
-      "[INFO] Main window loaded. Configuring update check for private repository..."
-    );
-
-    // Set authorization header for private repository access
-    autoUpdater.requestHeaders = {
-      Authorization: `token ${process.env.GH_TOKEN}`,
-    };
-
-    autoUpdater.setFeedURL({
-      provider: "github",
-      owner: "chrisdogtn",
-      repo: "RedditGrabber",
-    });
-
-    appLog("[INFO] Updater feed URL configured. Checking for updates...");
-    autoUpdater.checkForUpdates();
+    // With a public repo, this simple call is all that's needed.
+    autoUpdater.checkForUpdatesAndNotify();
   });
 }
 
-// --- Auto-Updater Logic ---
+// Auto-Updater Listeners
 autoUpdater.on("checking-for-update", () =>
   appLog("[Updater] Checking for update...")
+);
+autoUpdater.on("update-not-available", (info) =>
+  appLog("[Updater] You are on the latest version.")
 );
 autoUpdater.on("update-available", (info) => {
   appLog(`[Updater] Update available (v${info.version}).`);
@@ -112,13 +81,9 @@ autoUpdater.on("update-available", (info) => {
     message: "Update available. Downloading...",
   });
 });
-autoUpdater.on("update-not-available", (info) =>
-  appLog("[Updater] You are on the latest version.")
+autoUpdater.on("download-progress", (progressObj) =>
+  appLog(`[Updater] Downloading update: ${Math.round(progressObj.percent)}%`)
 );
-autoUpdater.on("error", (err) => appLog(`[Updater] Error: ${err.toString()}`));
-autoUpdater.on("download-progress", (progressObj) => {
-  appLog(`[Updater] Downloading update: ${Math.round(progressObj.percent)}%`);
-});
 autoUpdater.on("update-downloaded", (info) => {
   appLog(`[Updater] Update v${info.version} downloaded.`);
   mainWindow.webContents.send("update-notification", {
@@ -126,8 +91,11 @@ autoUpdater.on("update-downloaded", (info) => {
     showRestart: true,
   });
 });
+autoUpdater.on("error", (err) =>
+  appLog(`[Updater] Error: ${err.message || err}`)
+);
 
-// --- App Event Handlers ---
+// App Event Handlers
 app.whenReady().then(createWindow);
 app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -136,22 +104,26 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
-// --- IPC Handlers ---
+// IPC Handlers
 ipcMain.on("restart_app", () => autoUpdater.quitAndInstall());
-ipcMain.handle("dialog:openFile", async () => {
-  /* ... */
-});
-ipcMain.handle("dialog:setDownloadPath", async () => {
-  /* ... */
-});
+ipcMain.handle("get-app-version", () => app.getVersion());
 ipcMain.handle("settings:getDownloadPath", () =>
   store.get("downloadPath", app.getPath("downloads"))
 );
-ipcMain.handle("get-app-version", () => app.getVersion());
 ipcMain.on("start-download", (event, options) => {
   runDownloader(options, appLog).catch((err) =>
     appLog(`[FATAL] Unhandled error: ${err.message}`)
   );
+});
+ipcMain.handle("dialog:setDownloadPath", async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+    properties: ["openDirectory"],
+  });
+  if (!canceled) {
+    store.set("downloadPath", filePaths[0]);
+    return filePaths[0];
+  }
+  return null;
 });
 ipcMain.on("stop-download", () => {
   isCancelled = true;
@@ -161,6 +133,8 @@ ipcMain.on("skip-subreddit", () => {
 });
 
 // --- CORE DOWNLOADER LOGIC AND HELPERS ---
+// This entire section is stable and does not need any changes.
+// It can be pasted from our last working version.
 const BROWSER_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
 let redgifsToken = null;
