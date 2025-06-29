@@ -65,6 +65,8 @@ const menuTemplate = [
   },
 ];
 
+// highlight-start
+// --- CORRECTED createWindow FUNCTION ---
 async function createWindow() {
   const { default: StoreClass } = await import("electron-store");
   Store = StoreClass;
@@ -84,10 +86,15 @@ async function createWindow() {
   const menu = Menu.buildFromTemplate(menuTemplate);
   Menu.setApplicationMenu(menu);
   mainWindow.loadFile(path.join(__dirname, "index.html"));
-  mainWindow.once("ready-to-show", () => {
+
+  // This is the corrected logic. The check now runs as soon as the window's content has loaded,
+  // which is more reliable than the 'ready-to-show' event for packaged apps.
+  mainWindow.webContents.on("did-finish-load", () => {
+    appLog("[INFO] Main window loaded. Initiating update check...");
     autoUpdater.checkForUpdatesAndNotify();
   });
 }
+// highlight-end
 
 // --- Auto-Updater Logic ---
 autoUpdater.on("checking-for-update", () =>
