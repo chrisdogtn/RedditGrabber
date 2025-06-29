@@ -1,28 +1,24 @@
 // build.js
 
-// 1. Load the .env file
+// 1. Load the .env file and set the environment variables
 require("dotenv").config();
 
-// 2. Import electron-builder
+// 2. Import the electron-builder library
 const builder = require("electron-builder");
-const Platform = builder.Platform;
 
-console.log("Starting build process...");
+console.log("Starting build and publish process...");
 
-// 3. Run the build process with explicit configuration
+// 3. Run the build process
 builder
   .build({
-    targets: Platform.WINDOWS.createTarget(), // Explicitly build for Windows
-    config: {
-      // All configuration is now read from package.json,
-      // but you could override it here if needed.
-    },
-    // This is the most important flag, tells builder to publish
-    // after a successful build.
+    // This tells the builder to publish after a successful build.
+    // It will look for the GH_TOKEN in the environment variables we just loaded.
     publish: "always",
+    config: {
+      // All other configuration is read from package.json
+    },
   })
   .then((result) => {
-    // The result array contains the paths to the built files
     console.log("Build complete!");
     console.log("Built files:", result);
   })
