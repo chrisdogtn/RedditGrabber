@@ -6,7 +6,7 @@
   "scripts": {
     "start": "electron .",
     "pack": "electron-builder --dir",
-    "dist": "dotenv electron-builder"
+    "dist": "node build.js"
   },
   "keywords": [],
   "author": {
@@ -29,7 +29,7 @@
     "publish": {
       "provider": "github",
       "owner": "chrisdogtn",
-      "repo": "grabber"
+      "repo": "RedditGrabber"
     },
     "win": {
       "target": "nsis"
