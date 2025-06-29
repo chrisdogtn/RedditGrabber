@@ -5,8 +5,10 @@ const fsp = require("fs").promises;
 const axios = require("axios");
 const { autoUpdater } = require("electron-updater");
 
+// Dynamically import electron-store
 let Store;
 let store;
+
 const packageJson = require("../package.json");
 let mainWindow;
 let isCancelled = false;
@@ -40,12 +42,7 @@ function appLog(message) {
 const menuTemplate = [
   {
     label: "File",
-    submenu: [
-      {
-        role: "quit",
-        accelerator: process.platform === "darwin" ? "Cmd+Q" : "Ctrl+Q",
-      },
-    ],
+    submenu: [{ role: "quit" }],
   },
   {
     label: "Help",
@@ -65,8 +62,6 @@ const menuTemplate = [
   },
 ];
 
-// highlight-start
-// --- CORRECTED createWindow FUNCTION ---
 async function createWindow() {
   const { default: StoreClass } = await import("electron-store");
   Store = StoreClass;
@@ -87,21 +82,33 @@ async function createWindow() {
   Menu.setApplicationMenu(menu);
   mainWindow.loadFile(path.join(__dirname, "index.html"));
 
-  // This is the corrected logic. The check now runs as soon as the window's content has loaded,
-  // which is more reliable than the 'ready-to-show' event for packaged apps.
+  // highlight-start
+  // FINAL CORRECTED UPDATE LOGIC - Following the official documentation
   mainWindow.webContents.on("did-finish-load", () => {
-    appLog("[INFO] Main window loaded. Initiating update check...");
-    autoUpdater.checkForUpdatesAndNotify();
+    appLog("[INFO] Main window loaded. Configuring update check...");
+
+    // Step 1: Explicitly set the feed URL, as required by the docs.
+    autoUpdater.setFeedURL({
+      provider: "github",
+      owner: packageJson.build.publish.owner,
+      repo: packageJson.build.publish.repo,
+    });
+
+    // Step 2: Call checkForUpdates() after setting the feed URL.
+    // The 'update-available' event will then trigger the download automatically.
+    autoUpdater.checkForUpdates();
   });
+  // highlight-end
 }
-// highlight-end
 
 // --- Auto-Updater Logic ---
 autoUpdater.on("checking-for-update", () =>
   appLog("[Updater] Checking for update...")
 );
 autoUpdater.on("update-available", (info) => {
-  appLog(`[Updater] Update available (v${info.version}).`);
+  appLog(
+    `[Updater] Update available (v${info.version}). Download will start automatically.`
+  );
   mainWindow.webContents.send("update-notification", {
     message: "Update available. Downloading...",
   });
@@ -121,7 +128,7 @@ autoUpdater.on("update-downloaded", (info) => {
   });
 });
 
-// --- App Event Handlers ---
+// --- App Event Handlers & IPC Handlers (No changes below this line) ---
 app.whenReady().then(createWindow);
 app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -129,8 +136,6 @@ app.on("activate", () => {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
-
-// --- IPC Handlers ---
 ipcMain.on("restart_app", () => autoUpdater.quitAndInstall());
 ipcMain.handle("dialog:openFile", async () => {
   const { canceled, filePaths } = await dialog.showOpenDialog({
@@ -167,7 +172,6 @@ ipcMain.on("skip-subreddit", () => {
   isSkipping = true;
 });
 
-// --- CORE DOWNLOADER LOGIC ---
 const BROWSER_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
 let redgifsToken = null;
