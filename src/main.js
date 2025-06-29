@@ -5,19 +5,36 @@ const fsp = require("fs").promises;
 const axios = require("axios");
 const { autoUpdater } = require("electron-updater");
 
-// Add electron-log for better update logging
-const log = require("electron-log");
-autoUpdater.logger = log;
-autoUpdater.logger.transports.file.level = "info";
-
-// Dynamically import electron-store
 let Store;
 let store;
-
 const packageJson = require("../package.json");
 let mainWindow;
 let isCancelled = false;
 let isSkipping = false;
+
+// --- Built-in Logging System ---
+let logFilePath;
+function initializeLog(logPath) {
+  try {
+    logFilePath = path.join(logPath, "app_log.log");
+    const header = `--- Log session started at ${new Date().toISOString()} ---\n`;
+    fs.writeFileSync(logFilePath, header);
+  } catch (error) {
+    console.error("Failed to initialize log file:", error);
+  }
+}
+function appLog(message) {
+  if (mainWindow) {
+    mainWindow.webContents.send("log-update", message);
+  }
+  if (logFilePath) {
+    fs.appendFileSync(
+      logFilePath,
+      `[${new Date().toISOString()}] ${message}\n`
+    );
+  }
+  console.log(message);
+}
 
 // --- CUSTOM APPLICATION MENU ---
 const menuTemplate = [
@@ -25,11 +42,8 @@ const menuTemplate = [
     label: "File",
     submenu: [
       {
-        label: "Quit",
+        role: "quit",
         accelerator: process.platform === "darwin" ? "Cmd+Q" : "Ctrl+Q",
-        click: () => {
-          app.quit();
-        },
       },
     ],
   },
@@ -41,7 +55,7 @@ const menuTemplate = [
         click: () => {
           dialog.showMessageBox(mainWindow, {
             type: "info",
-            title: "About Reddit Downloader",
+            title: `About ${app.getName()}`,
             message: `Version: ${app.getVersion()}\nAuthor: chrisdogtn`,
             detail: "A simple application to download media from subreddits.",
           });
@@ -55,71 +69,45 @@ async function createWindow() {
   const { default: StoreClass } = await import("electron-store");
   Store = StoreClass;
   store = new Store();
-
+  initializeLog(app.getPath("userData"));
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 1200,
-    minWidth: 1400,
-    minHeight: 1200,
+    minWidth: 940,
+    minHeight: 700,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
     },
   });
-
   const menu = Menu.buildFromTemplate(menuTemplate);
   Menu.setApplicationMenu(menu);
-
   mainWindow.loadFile(path.join(__dirname, "index.html"));
-
   mainWindow.once("ready-to-show", () => {
     autoUpdater.checkForUpdatesAndNotify();
   });
 }
 
 // --- Auto-Updater Logic ---
-function sendUpdateLog(message) {
-  log.info(`[Updater] ${message}`);
-  if (mainWindow) {
-    mainWindow.webContents.send("log-update", `[Updater] ${message}`);
-  }
-}
-
-autoUpdater.on("checking-for-update", () => {
-  sendUpdateLog("Checking for update...");
-});
+autoUpdater.on("checking-for-update", () =>
+  appLog("[Updater] Checking for update...")
+);
 autoUpdater.on("update-available", (info) => {
-  sendUpdateLog(`Update available (v${info.version}).`);
+  appLog(`[Updater] Update available (v${info.version}).`);
   mainWindow.webContents.send("update-notification", {
     message: "Update available. Downloading...",
   });
 });
-autoUpdater.on("update-not-available", (info) => {
-  sendUpdateLog("You are on the latest version.");
-});
-autoUpdater.on("error", (err) => {
-  sendUpdateLog(`Error in auto-updater: ${err.toString()}`);
-});
+autoUpdater.on("update-not-available", (info) =>
+  appLog("[Updater] You are on the latest version.")
+);
+autoUpdater.on("error", (err) => appLog(`[Updater] Error: ${err.toString()}`));
 autoUpdater.on("download-progress", (progressObj) => {
-  let log_message = `Download speed: ${Math.round(
-    progressObj.bytesPerSecond / 1024
-  )} KB/s`;
-  log_message =
-    log_message + " - Downloaded " + Math.round(progressObj.percent) + "%";
-  log_message =
-    log_message +
-    " (" +
-    Math.round(progressObj.transferred / 1024 / 1024) +
-    "/" +
-    Math.round(progressObj.total / 1024 / 1024) +
-    " MB)";
-  sendUpdateLog(log_message);
+  appLog(`[Updater] Downloading update: ${Math.round(progressObj.percent)}%`);
 });
 autoUpdater.on("update-downloaded", (info) => {
-  sendUpdateLog(
-    `Update v${info.version} downloaded. It will be installed on restart.`
-  );
+  appLog(`[Updater] Update v${info.version} downloaded.`);
   mainWindow.webContents.send("update-notification", {
     message: "Update downloaded. Restart to install.",
     showRestart: true,
@@ -136,9 +124,7 @@ app.on("window-all-closed", () => {
 });
 
 // --- IPC Handlers ---
-ipcMain.on("restart_app", () => {
-  autoUpdater.quitAndInstall();
-});
+ipcMain.on("restart_app", () => autoUpdater.quitAndInstall());
 ipcMain.handle("dialog:openFile", async () => {
   const { canceled, filePaths } = await dialog.showOpenDialog({
     properties: ["openFile"],
@@ -161,15 +147,10 @@ ipcMain.handle("dialog:setDownloadPath", async () => {
 ipcMain.handle("settings:getDownloadPath", () =>
   store.get("downloadPath", app.getPath("downloads"))
 );
-ipcMain.handle("get-app-version", () => {
-  return app.getVersion();
-});
+ipcMain.handle("get-app-version", () => app.getVersion());
 ipcMain.on("start-download", (event, options) => {
-  const logUpdater = (message) => {
-    if (mainWindow) mainWindow.webContents.send("log-update", message);
-  };
-  runDownloader(options, logUpdater).catch((err) =>
-    logUpdater(`[FATAL] Unhandled error in downloader: ${err.message}`)
+  runDownloader(options, appLog).catch((err) =>
+    appLog(`[FATAL] Unhandled error: ${err.message}`)
   );
 });
 ipcMain.on("stop-download", () => {
@@ -193,14 +174,12 @@ async function runDownloader(options, log) {
     log("[ERROR] Download location not set.");
     return;
   }
-
   const unhandledLogPath = path.join(downloadPath, "unhandled_links.log");
   fs.writeFileSync(
     unhandledLogPath,
     `--- Log for session started at ${new Date().toISOString()} ---\n`
   );
   log(`[INFO] Unhandled links will be saved to: ${unhandledLogPath}`);
-
   redgifsToken = null;
   await fsp.mkdir(downloadPath, { recursive: true });
   const subredditsToDownload = options.subreddits.filter(
@@ -213,13 +192,11 @@ async function runDownloader(options, log) {
     return;
   }
   log(`[INFO] ${totalJobs} subreddits are pending download.`);
-
   if (mainWindow)
     mainWindow.webContents.send("queue-progress", {
       current: 0,
       total: totalJobs,
     });
-
   for (let i = 0; i < totalJobs; i++) {
     const subreddit = subredditsToDownload[i];
     if (isCancelled) {
@@ -227,7 +204,6 @@ async function runDownloader(options, log) {
       break;
     }
     isSkipping = false;
-
     const { url: subredditUrl } = subreddit;
     const subredditName = extractName(subredditUrl);
     if (!subredditName) {
@@ -460,7 +436,6 @@ async function extractMediaUrlsFromPost(
     is_gallery,
     media_metadata,
   } = postData;
-
   try {
     if (postUrl.includes("/comments/")) {
       return urls;
