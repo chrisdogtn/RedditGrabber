@@ -1,15 +1,17 @@
-const { app, BrowserWindow, ipcMain, dialog, Menu } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, Menu, net } = require("electron");
 const fs = require("fs");
 const path = require("path");
 const fsp = require("fs").promises;
 const axios = require("axios");
 const { autoUpdater } = require("electron-updater");
 
+// Load .env file for the GH_TOKEN
+require("dotenv").config();
+
+// Dynamically import electron-store
 let Store;
 let store;
 
-// We no longer need to read package.json for the updater config
-// const packageJson = require('../package.json');
 let mainWindow;
 let isCancelled = false;
 let isSkipping = false;
@@ -40,10 +42,7 @@ function appLog(message) {
 
 // --- CUSTOM APPLICATION MENU ---
 const menuTemplate = [
-  {
-    label: "File",
-    submenu: [{ role: "quit" }],
-  },
+  { label: "File", submenu: [{ role: "quit" }] },
   {
     label: "Help",
     submenu: [
@@ -83,17 +82,20 @@ async function createWindow() {
   mainWindow.loadFile(path.join(__dirname, "index.html"));
 
   mainWindow.webContents.on("did-finish-load", () => {
-    appLog("[INFO] Main window loaded. Configuring update check...");
+    appLog(
+      "[INFO] Main window loaded. Configuring update check for private repository..."
+    );
 
-    // highlight-start
-    // DEFINITIVE FIX: Hard-code the owner and repo directly.
-    // This avoids any file-reading errors in the packaged app.
+    // Set authorization header for private repository access
+    autoUpdater.requestHeaders = {
+      Authorization: `token ${process.env.GH_TOKEN}`,
+    };
+
     autoUpdater.setFeedURL({
       provider: "github",
       owner: "chrisdogtn",
       repo: "RedditGrabber",
     });
-    // highlight-end
 
     appLog("[INFO] Updater feed URL configured. Checking for updates...");
     autoUpdater.checkForUpdates();
@@ -147,7 +149,9 @@ ipcMain.handle("settings:getDownloadPath", () =>
 );
 ipcMain.handle("get-app-version", () => app.getVersion());
 ipcMain.on("start-download", (event, options) => {
-  /* ... */
+  runDownloader(options, appLog).catch((err) =>
+    appLog(`[FATAL] Unhandled error: ${err.message}`)
+  );
 });
 ipcMain.on("stop-download", () => {
   isCancelled = true;
