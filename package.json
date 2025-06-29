@@ -39,5 +39,7 @@
     "linux": {
       "target": "AppImage"
     }
-  }
+  },    "imgur": {
+      "clientId": "513619e8679dcbb"
+    }
 }

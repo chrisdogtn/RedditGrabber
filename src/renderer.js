@@ -12,13 +12,27 @@ document.addEventListener("DOMContentLoaded", () => {
   const progressLabel = document.getElementById("progress-label");
   const progressValue = document.getElementById("progress-value");
   const progressBar = document.getElementById("progress-bar-foreground");
+  const overallProgressContainer = document.getElementById(
+    "overall-progress-container"
+  );
+  const overallProgressLabel = document.getElementById(
+    "overall-progress-label"
+  );
+  const overallProgressValue = document.getElementById(
+    "overall-progress-value"
+  );
+  const overallProgressBar = document.getElementById(
+    "overall-progress-bar-foreground"
+  );
   const startBtn = document.getElementById("start-btn");
+  const skipBtn = document.getElementById("skip-btn");
+  const stopBtn = document.getElementById("stop-btn");
   const subredditList = document.getElementById("subreddit-list");
   const logArea = document.getElementById("log-area");
   const typeImages = document.getElementById("type-images");
   const typeGifs = document.getElementById("type-gifs");
   const typeVideos = document.getElementById("type-videos");
-  const limitPosts = document.getElementById("limit-posts");
+  const limitLinksInput = document.getElementById("limit-links");
   const pageStart = document.getElementById("page-start");
   const pageEnd = document.getElementById("page-end");
   const clearQueueBtn = document.getElementById("clear-queue-btn");
@@ -26,6 +40,7 @@ document.addEventListener("DOMContentLoaded", () => {
   const loadFromFileBtn = document.getElementById("load-from-file-btn");
   const addFromTextBtn = document.getElementById("add-from-text-btn");
   const clearCompletedBtn = document.getElementById("clear-completed-btn");
+  const autoClearToggle = document.getElementById("auto-clear-toggle");
 
   // ===== State Management =====
   let subreddits = [];
@@ -100,9 +115,30 @@ document.addEventListener("DOMContentLoaded", () => {
       );
     if (rejectedCount > 0)
       addLogMessage(`[INFO] Ignored ${rejectedCount} invalid entries.`);
-    if (addedCount === 0 && addedCount === 0 && rejectedCount === 0)
-      addLogMessage("[INFO] No new subreddits were added.");
+    if (
+      addedCount === 0 &&
+      rejectedCount === 0 &&
+      urlArray.some((u) => u.trim() !== "")
+    ) {
+      addLogMessage(
+        "[INFO] No new subreddits were added (all items were empty or duplicates)."
+      );
+    }
     renderSubreddits();
+  }
+
+  // ===== UI State Management =====
+  function setUiForDownloading(isDownloading) {
+    startBtn.classList.toggle("hidden", isDownloading);
+    skipBtn.classList.toggle("hidden", !isDownloading);
+    stopBtn.classList.toggle("hidden", !isDownloading);
+    if (!isDownloading) {
+      progressContainer.classList.add("hidden");
+      overallProgressContainer.classList.add("hidden");
+    } else {
+      progressContainer.classList.remove("hidden");
+      overallProgressContainer.classList.remove("hidden");
+    }
   }
 
   // ===== Event Listeners =====
@@ -155,29 +191,41 @@ document.addEventListener("DOMContentLoaded", () => {
   startBtn.addEventListener("click", () => {
     const pendingSubs = subreddits.filter((s) => s.status === "pending");
     if (pendingSubs.length > 0) {
+      setUiForDownloading(true);
       logArea.innerHTML = "";
       addLogMessage("[INFO] Starting download process...");
-      progressContainer.classList.remove("hidden");
+      progressBar.classList.remove("indeterminate");
       progressBar.style.width = "0%";
       progressValue.textContent = "0%";
       progressLabel.textContent = "Initializing...";
+      overallProgressBar.style.width = "0%";
+      overallProgressValue.textContent = "0%";
       const options = {
         subreddits: subreddits,
+        autoClear: autoClearToggle.checked,
         fileTypes: {
-          images: document.getElementById("type-images").checked,
-          gifs: document.getElementById("type-gifs").checked,
-          videos: document.getElementById("type-videos").checked,
+          images: typeImages.checked,
+          gifs: typeGifs.checked,
+          videos: typeVideos.checked,
         },
-        maxPosts:
-          parseInt(document.getElementById("limit-posts").value, 10) || 0,
-        pageStart:
-          parseInt(document.getElementById("page-start").value, 10) || 1,
-        pageEnd: parseInt(document.getElementById("page-end").value, 10) || 0,
+        maxLinks: parseInt(limitLinksInput.value, 10) || 0,
+        pageStart: parseInt(pageStart.value, 10) || 1,
+        pageEnd: parseInt(pageEnd.value, 10) || 0,
       };
       window.api.startDownload(options);
     } else {
       addLogMessage("[INFO] No pending subreddits in the queue to download.");
     }
+  });
+
+  stopBtn.addEventListener("click", () => {
+    window.api.stopDownload();
+    addLogMessage("[INFO] Stop command sent. Finishing current operations...");
+  });
+
+  skipBtn.addEventListener("click", () => {
+    window.api.skipSubreddit();
+    addLogMessage("[INFO] Skip command sent. Moving to next subreddit...");
   });
 
   closeNotificationBtn.addEventListener("click", () => {
@@ -190,6 +238,22 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // ===== IPC & Log Handlers =====
   function addLogMessage(message) {
+    if (
+      message.includes("--- ALL JOBS COMPLETE ---") ||
+      message.includes("[FATAL]")
+    ) {
+      setUiForDownloading(false);
+    }
+    if (message.includes("Starting scan...")) {
+      progressBar.classList.add("indeterminate");
+      progressLabel.textContent = "Scanning for media...";
+      progressValue.textContent = "";
+    } else if (
+      message.includes("Found") &&
+      message.includes("potential files")
+    ) {
+      progressBar.classList.remove("indeterminate");
+    }
     const logMessage = document.createElement("div");
     logMessage.className = "log-message";
     if (message.includes("[SUCCESS]")) logMessage.classList.add("log-success");
@@ -204,19 +268,34 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   window.api.onLogUpdate((event, message) => addLogMessage(message));
+
   window.api.onDownloadProgress((event, { current, total }) => {
+    progressBar.classList.remove("indeterminate");
     const percentage = Math.round((current / total) * 100);
     progressBar.style.width = `${percentage}%`;
     progressValue.textContent = `${percentage}%`;
     progressLabel.textContent = `Downloading ${current} of ${total}...`;
   });
+
+  window.api.onQueueProgress((event, { current, total }) => {
+    const percentage = Math.round((current / total) * 100);
+    overallProgressBar.style.width = `${percentage}%`;
+    overallProgressValue.textContent = `${percentage}%`;
+    overallProgressLabel.textContent = `Overall Progress (${current} of ${total})`;
+  });
+
   window.api.onSubredditComplete((event, completedUrl) => {
     const subToUpdate = subreddits.find((s) => s.url === completedUrl);
     if (subToUpdate) {
-      subToUpdate.status = "complete";
+      if (autoClearToggle.checked) {
+        subreddits = subreddits.filter((s) => s.url !== completedUrl);
+      } else {
+        subToUpdate.status = "complete";
+      }
       renderSubreddits();
     }
   });
+
   window.api.onUpdateNotification((event, { message, showRestart }) => {
     notificationMessage.textContent = message;
     notification.classList.remove("hidden");
@@ -231,6 +310,5 @@ document.addEventListener("DOMContentLoaded", () => {
       "[INFO] Welcome! Choose a download location, then add subreddits."
     );
   }
-
   loadInitialSettings();
 });

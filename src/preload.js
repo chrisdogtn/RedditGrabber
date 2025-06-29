@@ -7,6 +7,8 @@ contextBridge.exposeInMainWorld("api", {
   setDownloadPath: () => ipcRenderer.invoke("dialog:setDownloadPath"),
   getDownloadPath: () => ipcRenderer.invoke("settings:getDownloadPath"),
   restartApp: () => ipcRenderer.send("restart_app"),
+  stopDownload: () => ipcRenderer.send("stop-download"),
+  skipSubreddit: () => ipcRenderer.send("skip-subreddit"),
 
   // To receive data from main in renderer
   onLogUpdate: (callback) => ipcRenderer.on("log-update", callback),
@@ -16,4 +18,5 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.on("subreddit-complete", callback),
   onUpdateNotification: (callback) =>
     ipcRenderer.on("update-notification", callback),
+  onQueueProgress: (callback) => ipcRenderer.on("queue-progress", callback),
 });

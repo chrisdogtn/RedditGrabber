@@ -3,7 +3,7 @@
   --color-background: #121212;
   --color-panel-background: rgba(38, 38, 38, 0.5);
   --color-border: rgba(255, 255, 255, 0.1);
-  --color-primary: #00f5d4; /* Vibrant Teal/Cyan */
+  --color-primary: #00f5d4;
   --color-primary-hover: #00e0c3;
   --color-text-primary: #e0e0e0;
   --color-text-secondary: #888888;
@@ -37,26 +37,26 @@ h3 {
   display: flex;
   height: 100vh;
 }
+
 .sidebar {
   width: 400px;
   padding: 24px;
   border-right: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
+  flex-shrink: 0; /* Prevent sidebar from shrinking */
 }
+
+/* highlight-start */
+/* THIS IS THE CORE FIX FOR THE OVERFLOW BUG */
 .main-content {
   flex-grow: 1;
   padding: 24px;
   display: flex;
   flex-direction: column;
+  min-width: 0; /* CRITICAL: Allows this flex item to shrink below its content's intrinsic size */
 }
-.main-content > *,
-h2.section-title {
-  max-width: 800px;
-  width: 100%;
-  margin-left: auto;
-  margin-right: auto;
-}
+/* highlight-end */
 
 /* ===== Glassmorphism Panel ===== */
 .glass-panel {
@@ -73,6 +73,12 @@ h2.section-title {
   margin: 0 0 24px 0;
   font-size: 1.8rem;
   color: var(--color-primary);
+}
+.app-tagline {
+  color: var(--color-text-secondary);
+  font-size: 0.9rem;
+  font-weight: 500;
+  margin: -16px 0 32px 4px;
 }
 
 .add-panel textarea {
@@ -235,7 +241,6 @@ button.danger:hover {
   padding: 0 0 8px 0;
   font-size: 0.9rem;
 }
-
 .checkbox-group-horizontal {
   display: flex;
   justify-content: space-around;
@@ -249,7 +254,6 @@ button.danger:hover {
   color: var(--color-text-secondary);
   margin-left: 8px;
 }
-
 .range-group {
   display: flex;
   align-items: center;
@@ -264,35 +268,51 @@ button.danger:hover {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 24px;
   padding: 12px 16px;
 }
 .path-info {
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+  min-width: 0;
 }
 #download-path-display {
   color: var(--color-text-primary);
   font-family: monospace;
   font-size: 0.9rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 #set-path-btn {
   flex-shrink: 0;
   margin-left: 16px;
 }
 
-#start-btn {
+.main-actions-group {
+  display: flex;
+  gap: 12px;
+  margin-top: 24px;
+  margin-bottom: 24px;
+}
+.main-actions-group #start-btn {
+  flex-grow: 1;
   padding: 16px;
   font-size: 1.1rem;
 }
+.main-actions-group .sidebar-btn {
+  padding: 16px;
+  font-size: 1.1rem;
+  flex-grow: 0;
+}
 
 #progress-container {
-  padding: 16px;
-  margin-top: 24px;
+  margin-top: 0;
 }
 .hidden {
   display: none !important;
 }
+
 .progress-text {
   display: flex;
   justify-content: space-between;
@@ -305,19 +325,69 @@ button.danger:hover {
 #progress-value {
   font-weight: 700;
 }
+
 .progress-bar-background {
   width: 100%;
-  height: 8px;
-  background-color: rgba(0, 0, 0, 0.3);
-  border-radius: 4px;
+  height: 16px;
+  background-color: rgba(0, 0, 0, 0.4);
+  border-radius: 8px;
   overflow: hidden;
+  margin-top: 4px;
 }
-.progress-bar-foreground {
+.progress-bar-background.small {
+  height: 6px;
+  border-radius: 3px;
+}
+
+#progress-bar-foreground,
+#overall-progress-bar-foreground {
   height: 100%;
   width: 0%;
-  background-color: var(--color-primary);
-  border-radius: 4px;
+  border-radius: 8px;
   transition: width 0.2s ease-out;
+  background: linear-gradient(90deg, #00f5d4, #00b3a7, #00f5d4);
+  background-size: 200% 200%;
+  animation: gradient-animation 2s ease infinite;
+  box-shadow: 0 0 8px rgba(0, 245, 212, 0.5), 0 0 16px rgba(0, 245, 212, 0.3);
+}
+#progress-bar-foreground.indeterminate {
+  width: 100% !important;
+  background-size: 400% 400%;
+  animation: indeterminate-scroll 3s ease-in-out infinite;
+}
+
+#overall-progress-container {
+  margin-top: 16px;
+}
+.progress-text-small {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  margin-bottom: 4px;
+  color: var(--color-text-secondary);
+}
+#overall-progress-value {
+  font-weight: normal;
+}
+
+@keyframes gradient-animation {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+@keyframes indeterminate-scroll {
+  0% {
+    background-position: 200% 50%;
+  }
+  100% {
+    background-position: -200% 50%;
+  }
 }
 
 #log-area {
@@ -330,6 +400,7 @@ button.danger:hover {
 .log-message {
   padding: 2px 0;
   border-bottom: 1px solid var(--color-border);
+  overflow-wrap: break-word;
 }
 .log-message:last-child {
   border-bottom: none;
@@ -348,7 +419,6 @@ button.danger:hover {
   color: var(--color-text-secondary);
 }
 
-/* ===== Notifications ===== */
 #notification {
   position: fixed;
   bottom: 20px;
@@ -371,7 +441,6 @@ button.danger:hover {
   color: #000;
 }
 
-/* ===== Custom Scrollbar ===== */
 ::-webkit-scrollbar {
   width: 10px;
 }

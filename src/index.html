@@ -19,7 +19,7 @@
     <div class="app-container">
       <div class="sidebar">
         <h1 class="app-title">Reddit Downloader</h1>
-
+        <p class="app-tagline">&copy; 2025 chrisdogtn</p>
         <h2 class="section-title">Add Subreddits</h2>
         <div class="add-panel glass-panel">
           <textarea
@@ -34,7 +34,6 @@
 
         <h2 class="section-title">Queue</h2>
         <ul id="subreddit-list" class="glass-panel"></ul>
-
         <div class="queue-actions">
           <button id="clear-completed-btn" class="sidebar-btn">
             Clear Completed
@@ -65,8 +64,8 @@
           </fieldset>
           <fieldset>
             <legend>Limits</legend>
-            <label for="limit-posts">Max Posts to Scan</label>
-            <input type="number" id="limit-posts" placeholder="No limit" />
+            <label for="limit-links">Max Links to Download</label>
+            <input type="number" id="limit-links" placeholder="No limit" />
             <label for="limit-pages">Page Range</label>
             <div class="range-group">
               <input
@@ -77,6 +76,14 @@
               />
               <span>-</span>
               <input type="number" id="page-end" placeholder="End" min="1" />
+            </div>
+          </fieldset>
+          <fieldset>
+            <div class="checkbox-group">
+              <input type="checkbox" id="auto-clear-toggle" />
+              <label for="auto-clear-toggle"
+                >Auto-clear completed from queue</label
+              >
             </div>
           </fieldset>
         </div>
@@ -91,7 +98,15 @@
           <button id="set-path-btn">Choose Folder</button>
         </div>
 
-        <button id="start-btn">Start Download</button>
+        <div class="main-actions-group">
+          <button id="start-btn">Start Download</button>
+          <button id="skip-btn" class="sidebar-btn hidden">
+            Skip Subreddit
+          </button>
+          <button id="stop-btn" class="sidebar-btn danger hidden">
+            Stop All
+          </button>
+        </div>
 
         <div id="progress-container" class="glass-panel hidden">
           <div class="progress-text">
@@ -100,6 +115,15 @@
           </div>
           <div class="progress-bar-background">
             <div id="progress-bar-foreground"></div>
+          </div>
+          <div id="overall-progress-container" class="hidden">
+            <div class="progress-text-small">
+              <span id="overall-progress-label">Overall Progress</span>
+              <span id="overall-progress-value">0%</span>
+            </div>
+            <div class="progress-bar-background small">
+              <div id="overall-progress-bar-foreground"></div>
+            </div>
           </div>
         </div>
 

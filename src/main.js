@@ -1,39 +1,69 @@
-const { app, BrowserWindow, ipcMain, dialog } = require("electron");
+const { app, BrowserWindow, ipcMain, dialog, Menu } = require("electron");
 const fs = require("fs");
 const path = require("path");
 const fsp = require("fs").promises;
 const axios = require("axios");
 const { autoUpdater } = require("electron-updater");
 
-// highlight-start
-// The 'electron-store' library is now an ES Module, so we cannot use require().
-// We will import it dynamically inside an async function.
 let Store;
 let store;
-// highlight-end
 
+const packageJson = require("../package.json");
 let mainWindow;
+let isCancelled = false;
+let isSkipping = false;
 
-// --- Main Application Setup ---
+// --- CUSTOM APPLICATION MENU ---
+const menuTemplate = [
+  {
+    label: "File",
+    submenu: [
+      {
+        label: "Quit",
+        accelerator: process.platform === "darwin" ? "Cmd+Q" : "Ctrl+Q",
+        click: () => {
+          app.quit();
+        },
+      },
+    ],
+  },
+  {
+    label: "Help",
+    submenu: [
+      {
+        label: "About",
+        click: () => {
+          dialog.showMessageBox(mainWindow, {
+            type: "info",
+            title: "About Reddit Downloader",
+            message: `Version: ${app.getVersion()}\nAuthor: chrisdogtn`,
+            detail: "A simple application to download media from subreddits.",
+          });
+        },
+      },
+    ],
+  },
+];
+
 async function createWindow() {
-  // highlight-start
-  // Dynamically import and initialize electron-store
   const { default: StoreClass } = await import("electron-store");
   Store = StoreClass;
   store = new Store();
-  // highlight-end
 
   mainWindow = new BrowserWindow({
-    width: 1300,
-    height: 900,
-    minWidth: 940,
-    minHeight: 700,
+    width: 1000,
+    height: 1000,
+    minWidth: 1000,
+    minHeight: 945,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
       nodeIntegration: false,
     },
   });
+
+  const menu = Menu.buildFromTemplate(menuTemplate);
+  Menu.setApplicationMenu(menu);
 
   mainWindow.loadFile(path.join(__dirname, "index.html"));
 
@@ -42,107 +72,118 @@ async function createWindow() {
   });
 }
 
-// --- Auto-Updater Logic ---
 autoUpdater.on("update-available", () => {
-  if (mainWindow) {
+  if (mainWindow)
     mainWindow.webContents.send("update-notification", {
       message: "Update available. Downloading...",
     });
-  }
 });
 autoUpdater.on("update-downloaded", () => {
-  if (mainWindow) {
+  if (mainWindow)
     mainWindow.webContents.send("update-notification", {
       message: "Update downloaded. Restart to install.",
       showRestart: true,
     });
-  }
 });
 ipcMain.on("restart_app", () => {
   autoUpdater.quitAndInstall();
 });
-
-// --- App Event Handlers ---
 app.whenReady().then(createWindow);
-
 app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0) {
-    createWindow();
-  }
+  if (BrowserWindow.getAllWindows().length === 0) createWindow();
 });
-
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") {
-    app.quit();
-  }
+  if (process.platform !== "darwin") app.quit();
 });
-
-// --- IPC Handlers ---
 ipcMain.handle("dialog:openFile", async () => {
   const { canceled, filePaths } = await dialog.showOpenDialog({
     properties: ["openFile"],
     filters: [{ name: "Text Files", extensions: ["txt"] }],
   });
-  if (!canceled && filePaths.length > 0) {
+  if (!canceled && filePaths.length > 0)
     return fs.readFileSync(filePaths[0], "utf-8");
-  }
   return null;
 });
-
 ipcMain.handle("dialog:setDownloadPath", async () => {
   const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
     properties: ["openDirectory"],
   });
-  if (!canceled && filePaths.length > 0) {
-    const selectedPath = filePaths[0];
-    store.set("downloadPath", selectedPath); // Save the path
-    return selectedPath;
+  if (!canceled) {
+    store.set("downloadPath", filePaths[0]);
+    return filePaths[0];
   }
   return null;
 });
-
-ipcMain.handle("settings:getDownloadPath", () => {
-  return store.get("downloadPath", app.getPath("downloads"));
-});
-
+ipcMain.handle("settings:getDownloadPath", () =>
+  store.get("downloadPath", app.getPath("downloads"))
+);
 ipcMain.on("start-download", (event, options) => {
   const log = (message) => {
-    if (mainWindow) {
-      mainWindow.webContents.send("log-update", message);
-    }
+    if (mainWindow) mainWindow.webContents.send("log-update", message);
   };
   runDownloader(options, log).catch((err) =>
     log(`[FATAL] Unhandled error: ${err.message}`)
   );
 });
+ipcMain.on("stop-download", () => {
+  isCancelled = true;
+});
+ipcMain.on("skip-subreddit", () => {
+  isSkipping = true;
+});
 
-// --- CORE DOWNLOADER LOGIC (No changes below this line) ---
 const BROWSER_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
 let redgifsToken = null;
 
 async function runDownloader(options, log) {
   log(`[INFO] Starting download process...`);
+  isCancelled = false;
+  isSkipping = false;
   const downloadPath = store.get("downloadPath");
   if (!downloadPath) {
-    log("[ERROR] Download location not set. Please choose a folder first.");
+    log("[ERROR] Download location not set.");
     return;
   }
+
+  const unhandledLogPath = path.join(downloadPath, "unhandled_links.log");
+  fs.writeFileSync(
+    unhandledLogPath,
+    `--- Log for session started at ${new Date().toISOString()} ---\n`
+  );
+  log(`[INFO] Unhandled links will be saved to: ${unhandledLogPath}`);
+
   redgifsToken = null;
   await fsp.mkdir(downloadPath, { recursive: true });
   const subredditsToDownload = options.subreddits.filter(
     (s) => s.status === "pending"
   );
-  if (subredditsToDownload.length === 0) {
-    log("[INFO] No pending subreddits in the queue to download.");
+  const totalJobs = subredditsToDownload.length;
+  if (totalJobs === 0) {
+    log("[INFO] No pending subreddits to download.");
+    log("--- ALL JOBS COMPLETE ---");
     return;
   }
-  log(`[INFO] ${subredditsToDownload.length} subreddits are pending download.`);
-  for (const subreddit of subredditsToDownload) {
+  log(`[INFO] ${totalJobs} subreddits are pending download.`);
+
+  if (mainWindow)
+    mainWindow.webContents.send("queue-progress", {
+      current: 0,
+      total: totalJobs,
+    });
+
+  for (let i = 0; i < totalJobs; i++) {
+    const subreddit = subredditsToDownload[i];
+    if (isCancelled) {
+      log("[INFO] Download process stopped by user.");
+      break;
+    }
+    isSkipping = false;
+
     const { url: subredditUrl } = subreddit;
     const subredditName = extractName(subredditUrl);
     if (!subredditName) {
-      log(`[ERROR] Invalid URL, cannot extract name: ${subredditUrl}`);
+      log(`[ERROR] Invalid URL: ${subredditUrl}`);
       if (mainWindow)
         mainWindow.webContents.send("subreddit-complete", subredditUrl);
       continue;
@@ -151,15 +192,21 @@ async function runDownloader(options, log) {
     await fsp.mkdir(subredditDir, { recursive: true });
     log(`[INFO] [${subredditName}] Starting scan...`);
     try {
-      const links = await fetchAllMediaLinks(subredditUrl, options, log);
+      const links = await fetchAllMediaLinks(
+        subredditUrl,
+        options,
+        log,
+        unhandledLogPath
+      );
       log(`[INFO] [${subredditName}] Found ${links.length} potential files.`);
       let downloadCount = 0;
       if (links.length > 0) {
-        for (let i = 0; i < links.length; i++) {
-          const link = links[i];
+        for (let j = 0; j < links.length; j++) {
+          if (isCancelled || isSkipping) break;
+          const link = links[j];
           if (mainWindow)
             mainWindow.webContents.send("download-progress", {
-              current: i + 1,
+              current: j + 1,
               total: links.length,
             });
           const success = await downloadFile(
@@ -172,21 +219,33 @@ async function runDownloader(options, log) {
           if (success) downloadCount++;
         }
       }
-      log(
-        `[SUCCESS] [${subredditName}] Downloaded ${downloadCount} new files.`
-      );
-      if (mainWindow)
-        mainWindow.webContents.send("subreddit-complete", subredditUrl);
+      if (isSkipping) log(`[INFO] [${subredditName}] Skipped by user.`);
+      else if (!isCancelled)
+        log(
+          `[SUCCESS] [${subredditName}] Downloaded ${downloadCount} new files.`
+        );
     } catch (error) {
       log(`[ERROR] [${subredditName}] An error occurred: ${error.stack}`);
-      if (mainWindow)
+    } finally {
+      if (mainWindow) {
         mainWindow.webContents.send("subreddit-complete", subredditUrl);
+        mainWindow.webContents.send("queue-progress", {
+          current: i + 1,
+          total: totalJobs,
+        });
+      }
     }
   }
+  if (isCancelled) log("[INFO] Download process stopped by user.");
   log("--- ALL JOBS COMPLETE ---");
 }
 
-async function fetchAllMediaLinks(subredditUrl, options, log) {
+async function fetchAllMediaLinks(
+  subredditUrl,
+  options,
+  log,
+  unhandledLogPath
+) {
   let allLinks = [];
   let after = null;
   let postCount = 0;
@@ -196,7 +255,16 @@ async function fetchAllMediaLinks(subredditUrl, options, log) {
   const fetchOptions = {
     headers: { "User-Agent": BROWSER_USER_AGENT, Cookie: "over18=1" },
   };
+  log(`[INFO] Scanning for up to ${options.maxLinks || "unlimited"} links...`);
   do {
+    if (isCancelled || isSkipping) {
+      log(`[INFO] Scan for ${extractName(subredditUrl)} cancelled.`);
+      break;
+    }
+    if (options.maxLinks > 0 && allLinks.length >= options.maxLinks) {
+      log(`[INFO] Reached download limit of ${options.maxLinks}.`);
+      break;
+    }
     const url = `${subredditUrl.replace(
       /\/$/,
       ""
@@ -218,14 +286,22 @@ async function fetchAllMediaLinks(subredditUrl, options, log) {
       }
       const posts = data.data.children;
       for (const post of posts) {
-        const mediaFromPost = await extractMediaUrlsFromPost(post.data, log);
+        if (options.maxLinks > 0 && allLinks.length >= options.maxLinks) {
+          after = null;
+          break;
+        }
+        const mediaFromPost = await extractMediaUrlsFromPost(
+          post.data,
+          log,
+          unhandledLogPath
+        );
         allLinks.push(...mediaFromPost);
+        postCount++;
       }
+      if (!after) break;
       after = data.data.after;
       currentPage++;
-      postCount += posts.length;
       if (hasPageEnd && currentPage > options.pageEnd) after = null;
-      if (options.maxPosts > 0 && postCount >= options.maxPosts) after = null;
       await new Promise((resolve) => setTimeout(resolve, 500));
     } catch (error) {
       log(
@@ -234,12 +310,14 @@ async function fetchAllMediaLinks(subredditUrl, options, log) {
       break;
     }
   } while (after);
+  log(`[INFO] Scan complete. Scanned ${postCount} posts.`);
   const filteredLinks = allLinks.filter(
     (link) =>
       (options.fileTypes.images && link.type === "image") ||
       (options.fileTypes.gifs && link.type === "gif") ||
       (options.fileTypes.videos && link.type === "video")
   );
+  if (options.maxLinks > 0) return filteredLinks.slice(0, options.maxLinks);
   return filteredLinks;
 }
 
@@ -263,7 +341,48 @@ async function getRedgifsToken(log) {
   }
 }
 
-async function extractMediaUrlsFromPost(originalPostData, log) {
+async function scrapeImgurAlbum(albumUrl, log) {
+  const images = [];
+  try {
+    const response = await axios.get(albumUrl, {
+      headers: { "User-Agent": BROWSER_USER_AGENT },
+    });
+    const html = response.data;
+    const match = html.match(/<script>window.postDataJSON\s*=\s*'({.+})'/);
+    if (match && match[1]) {
+      const postData = JSON.parse(match[1]);
+      if (postData.media && Array.isArray(postData.media)) {
+        log(`[Imgur Album] Found ${postData.media.length} images in album.`);
+        for (const image of postData.media) {
+          images.push(`https://i.imgur.com/${image.id}${image.ext}`);
+        }
+      }
+    } else {
+      const imageMatches = html.matchAll(
+        /"hash":"([a-zA-Z0-9]+)".*?"ext":"(\.[a-zA-Z0-9]+)"/g
+      );
+      let foundImages = new Set();
+      for (const imgMatch of imageMatches) {
+        foundImages.add(`https://i.imgur.com/${imgMatch[1]}${imgMatch[2]}`);
+      }
+      if (foundImages.size > 0) {
+        log(`[Imgur Album] Fallback scraper found ${foundImages.size} images.`);
+        images.push(...foundImages);
+      }
+    }
+  } catch (error) {
+    log(
+      `[Parser] Failed to scrape Imgur album at ${albumUrl}: ${error.message}`
+    );
+  }
+  return images;
+}
+
+async function extractMediaUrlsFromPost(
+  originalPostData,
+  log,
+  unhandledLogPath
+) {
   const postData =
     originalPostData.crosspost_parent_list?.[0] || originalPostData;
   const urls = [];
@@ -277,28 +396,9 @@ async function extractMediaUrlsFromPost(originalPostData, log) {
     is_gallery,
     media_metadata,
   } = postData;
+  const SCRAPEABLE_HOSTS = ["imgur.com", "tumblr.com"];
   try {
-    if (domain === "redgifs.com") {
-      const token = await getRedgifsToken(log);
-      if (!token) throw new Error("Auth failed");
-      const slug = postUrl.split("/").pop();
-      const apiUrl = `https://api.redgifs.com/v2/gifs/${slug}`;
-      const apiResponse = await fetch(apiUrl, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "User-Agent": BROWSER_USER_AGENT,
-        },
-      });
-      if (!apiResponse.ok) throw new Error(`API status ${apiResponse.status}`);
-      const apiData = await apiResponse.json();
-      if (apiData?.gif?.urls?.hd)
-        urls.push({
-          url: apiData.gif.urls.hd,
-          type: "video",
-          id: postId,
-          title: postTitle,
-        });
-    } else if (is_video || domain === "v.redd.it") {
+    if (domain === "v.redd.it" || is_video) {
       if (secure_media?.reddit_video)
         urls.push({
           url: secure_media.reddit_video.fallback_url.split("?")[0],
@@ -306,6 +406,8 @@ async function extractMediaUrlsFromPost(originalPostData, log) {
           id: postId,
           title: postTitle,
         });
+    } else if (domain === "i.redd.it") {
+      urls.push({ url: postUrl, type: "image", id: postId, title: postTitle });
     } else if (is_gallery && media_metadata) {
       Object.values(media_metadata).forEach((item, i) => {
         if (item?.s?.u)
@@ -316,31 +418,89 @@ async function extractMediaUrlsFromPost(originalPostData, log) {
             title: postTitle,
           });
       });
+    } else if (domain === "redgifs.com") {
+      const token = await getRedgifsToken(log);
+      if (token) {
+        const slug = postUrl.split("/").pop();
+        const apiUrl = `https://api.redgifs.com/v2/gifs/${slug}`;
+        const apiResponse = await fetch(apiUrl, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "User-Agent": BROWSER_USER_AGENT,
+          },
+        });
+        if (apiResponse.ok) {
+          const apiData = await apiResponse.json();
+          if (apiData?.gif?.urls?.hd)
+            urls.push({
+              url: apiData.gif.urls.hd,
+              type: "video",
+              id: postId,
+              title: postTitle,
+            });
+        }
+      }
     } else {
-      const extension = path.extname(postUrl).toLowerCase();
-      if ([".jpg", ".jpeg", ".png", ".webp", ".bmp"].includes(extension))
+      const extension = path.extname(new URL(postUrl).pathname).toLowerCase();
+      const imageExtensions = [
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".webp",
+        ".bmp",
+        ".tif",
+        ".tiff",
+      ];
+      const gifExtensions = [".gif"];
+      if (imageExtensions.includes(extension)) {
         urls.push({
           url: postUrl,
           type: "image",
           id: postId,
           title: postTitle,
         });
-      else if ([".gif"].includes(extension))
+      } else if (gifExtensions.includes(extension)) {
         urls.push({ url: postUrl, type: "gif", id: postId, title: postTitle });
-      else if (extension === ".gifv")
+      } else if (postUrl.endsWith(".gifv")) {
         urls.push({
           url: postUrl.replace(".gifv", ".mp4"),
           type: "gif",
           id: postId,
           title: postTitle,
         });
-      else if (postUrl.includes("i.imgur.com"))
-        urls.push({
-          url: `${postUrl}.jpg`,
-          type: "image",
-          id: postId,
-          title: postTitle,
-        });
+      } else if (SCRAPEABLE_HOSTS.some((host) => domain.includes(host))) {
+        if (
+          domain.includes("imgur.com") &&
+          (postUrl.includes("/a/") || postUrl.includes("/gallery/"))
+        ) {
+          const albumImages = await scrapeImgurAlbum(postUrl, log);
+          albumImages.forEach((imageUrl, i) => {
+            urls.push({
+              url: imageUrl,
+              type: "image",
+              id: `${postId}_${i}`,
+              title: postTitle,
+            });
+          });
+        } else {
+          const directMediaUrl = await scrapePageForMedia(postUrl);
+          if (directMediaUrl) {
+            const mediaType =
+              path.extname(new URL(directMediaUrl).pathname).toLowerCase() ===
+              ".mp4"
+                ? "video"
+                : "image";
+            urls.push({
+              url: directMediaUrl,
+              type: mediaType,
+              id: postId,
+              title: postTitle,
+            });
+          }
+        }
+      } else {
+        fs.appendFileSync(unhandledLogPath, `${postUrl}\n`);
+      }
     }
   } catch (error) {
     log(`[Parser] Failed for post "${postTitle}": ${error.message}`);
@@ -357,18 +517,18 @@ function sanitizeTitleForFilename(title) {
 async function downloadFile(url, outputDir, log, postId, postTitle) {
   try {
     const sanitizedTitle = sanitizeTitleForFilename(postTitle);
-    const extension = path.extname(new URL(url).pathname);
+    const urlObj = new URL(url);
+    let extension = path.extname(urlObj.pathname);
+    if (!extension) extension = ".jpg";
     const fileName = `${sanitizedTitle}_${postId}${extension}`;
     const outputPath = path.join(outputDir, fileName);
-    if (fs.existsSync(outputPath)) {
-      log(`[INFO] Skipping duplicate: ${fileName}`);
-      return false;
-    }
+    if (fs.existsSync(outputPath)) return false;
     const response = await axios({
       method: "GET",
       url: url,
       responseType: "stream",
       timeout: 30000,
+      headers: { "User-Agent": BROWSER_USER_AGENT },
     });
     const writer = fs.createWriteStream(outputPath);
     response.data.pipe(writer);
