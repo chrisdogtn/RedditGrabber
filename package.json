@@ -6,7 +6,7 @@
   "scripts": {
     "start": "electron .",
     "pack": "electron-builder --dir",
-    "dist": "electron-builder"
+    "dist": "dotenv electron-builder"
   },
   "keywords": [],
   "author": {
@@ -19,6 +19,7 @@
   },
   "dependencies": {
     "axios": "^1.6.7",
+    "dotenv": "^17.0.0",
     "electron-store": "^8.1.0",
     "electron-updater": "^6.1.7"
   },
@@ -39,7 +40,8 @@
     "linux": {
       "target": "AppImage"
     }
-  },    "imgur": {
-      "clientId": "513619e8679dcbb"
-    }
+  },
+  "imgur": {
+    "clientId": "513619e8679dcbb"
+  }
 }
