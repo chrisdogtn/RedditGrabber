@@ -210,25 +210,32 @@ async function runDownloader(options, log) {
     }
     isSkipping = false;
     const subreddit = subredditsToDownload[i];
-    const { url: subredditUrl } = subreddit;
-    const subredditName = extractName(subredditUrl);
-    if (!subredditName) {
+    const { url: subredditUrl, type, domain } = subreddit;
+    let folderName;
+    if (type === "reddit") {
+      folderName = extractName(subredditUrl);
+    } else if (type === "ytdlp" && domain) {
+      folderName = domain;
+    } else {
+      folderName = "other";
+    }
+    if (!folderName) {
       log(`[ERROR] Invalid URL: ${subredditUrl}`);
       if (mainWindow)
         mainWindow.webContents.send("subreddit-complete", subredditUrl);
       continue;
     }
-    const subredditDir = path.join(downloadPath, subredditName);
+    const subredditDir = path.join(downloadPath, folderName);
     await fsp.mkdir(subredditDir, { recursive: true });
-    log(`[INFO] [${subredditName}] Starting scan...`);
+    log(`[INFO] [${folderName}] Starting scan...`);
     try {
       const links = await fetchAllMediaLinks(
         subredditUrl,
-        options,
+        { ...options, type, domain },
         log,
         unhandledLogPath
       );
-      log(`[INFO] [${subredditName}] Found ${links.length} potential files.`);
+      log(`[INFO] [${folderName}] Found ${links.length} potential files.`);
       let downloadCount = 0;
       if (links.length > 0) {
         for (let j = 0; j < links.length; j++) {
@@ -260,13 +267,11 @@ async function runDownloader(options, log) {
           if (success) downloadCount++;
         }
       }
-      if (isSkipping) log(`[INFO] [${subredditName}] Skipped by user.`);
+      if (isSkipping) log(`[INFO] [${folderName}] Skipped by user.`);
       else if (!isCancelled)
-        log(
-          `[SUCCESS] [${subredditName}] Downloaded ${downloadCount} new files.`
-        );
+        log(`[SUCCESS] [${folderName}] Downloaded ${downloadCount} new files.`);
     } catch (error) {
-      log(`[ERROR] [${subredditName}] An error occurred: ${error.stack}`);
+      log(`[ERROR] [${folderName}] An error occurred: ${error.stack}`);
     } finally {
       if (mainWindow) {
         mainWindow.webContents.send("subreddit-complete", subredditUrl);
@@ -281,12 +286,25 @@ async function runDownloader(options, log) {
   log("--- ALL JOBS COMPLETE ---");
 }
 
+// Patch fetchAllMediaLinks to handle yt-dlp links directly
 async function fetchAllMediaLinks(
   subredditUrl,
   options,
   log,
   unhandledLogPath
 ) {
+  if (options.type === "ytdlp" && options.domain) {
+    // Direct yt-dlp link, just return it for yt-dlp
+    return [
+      {
+        url: subredditUrl,
+        type: "video",
+        downloader: "ytdlp",
+        id: Date.now().toString(),
+        title: subredditUrl,
+      },
+    ];
+  }
   let allLinks = [];
   let after = null;
   let postCount = 0;
@@ -495,6 +513,8 @@ const YT_DLP_HOSTS = [
   "twitter.com",
   "thisvid.com",
   "webmshare.com",
+  "pmvhaven.com",
+  "ratedgross.com"
 ];
 
 async function extractMediaUrlsFromPost(

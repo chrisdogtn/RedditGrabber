@@ -49,14 +49,48 @@ document.addEventListener("DOMContentLoaded", () => {
   const TRASH_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor"><path d="M135.2 17.7L128 32H32C14.3 32 0 46.3 0 64S14.3 96 32 96H416c17.7 0 32-14.3 32-32s-14.3-32-32-32H320l-7.2-14.3C307.4 6.8 296.3 0 284.2 0H163.8c-12.1 0-23.2 6.8-28.6 17.7zM416 128H32L53.2 467c1.6 25.3 22.6 45 47.9 45H346.9c25.3 0 46.3-19.7 47.9-45L416 128z"/></svg>`;
   const CHECK_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512" fill="currentColor"><path d="M438.6 105.4c12.5 12.5 12.5 32.8 0 45.3l-256 256c-12.5 12.5-32.8 12.5-45.3 0l-128-128c-12.5-12.5-12.5-32.8 0-45.3s32.8-12.5 45.3 0L160 338.7 393.4 105.4c12.5-12.5 32.8-12.5 45.3 0z"/></svg>`;
 
+  // Add your yt-dlp whitelist here (should match main.js)
+  const YTDLP_WHITELIST = [
+    "youtube.com",
+    "youtu.be",
+    "x.com",
+    "facebook.com",
+    "twitch.tv",
+    "instagram.com",
+    "xhamster.com",
+    "pornhub.com",
+    "hypnotube.com",
+    "xvideos.com",
+    "twitter.com",
+    "thisvid.com",
+    "webmshare.com",
+  ];
+
   // ===== URL Processing =====
+  // Accepts Reddit subreddits or whitelisted yt-dlp domains
   function processAndValidateUrl(rawUrl) {
     try {
       const trimmedUrl = rawUrl.trim();
-      const regex =
-        /(https?:\/\/(?:www\.|old\.)?reddit\.com\/r\/[a-zA-Z0-9_]+)/;
-      const match = trimmedUrl.match(regex);
-      return match ? match[1] : null;
+      // Reddit subreddit
+      const redditMatch = trimmedUrl.match(
+        /(https?:\/\/(?:www\.|old\.)?reddit\.com\/r\/[a-zA-Z0-9_]+)/
+      );
+      if (redditMatch) return { url: redditMatch[1], type: "reddit" };
+
+      // yt-dlp whitelisted domains
+      try {
+        const urlObj = new URL(trimmedUrl);
+        if (
+          YTDLP_WHITELIST.some((domain) => urlObj.hostname.includes(domain))
+        ) {
+          return {
+            url: trimmedUrl,
+            type: "ytdlp",
+            domain: urlObj.hostname.replace(/^www\./, ""),
+          };
+        }
+      } catch {}
+      return null;
     } catch {
       return null;
     }
@@ -98,11 +132,17 @@ document.addEventListener("DOMContentLoaded", () => {
     let addedCount = 0;
     let rejectedCount = 0;
     urlArray.forEach((rawUrl) => {
-      const cleanedUrl = processAndValidateUrl(rawUrl);
-      if (cleanedUrl) {
-        if (!existingUrls.has(cleanedUrl)) {
-          existingUrls.add(cleanedUrl);
-          subreddits.push({ url: cleanedUrl, status: "pending" });
+      const result = processAndValidateUrl(rawUrl);
+      if (result) {
+        if (!existingUrls.has(result.url)) {
+          existingUrls.add(result.url);
+          // Store domain for ytdlp links, for folder naming
+          subreddits.push({
+            url: result.url,
+            status: "pending",
+            type: result.type,
+            domain: result.domain || null,
+          });
           addedCount++;
         }
       } else if (rawUrl.trim() !== "") {
@@ -110,9 +150,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
     if (addedCount > 0)
-      addLogMessage(
-        `[SUCCESS] Added ${addedCount} new subreddits to the queue.`
-      );
+      addLogMessage(`[SUCCESS] Added ${addedCount} new items to the queue.`);
     if (rejectedCount > 0)
       addLogMessage(`[INFO] Ignored ${rejectedCount} invalid entries.`);
     if (
@@ -120,7 +158,7 @@ document.addEventListener("DOMContentLoaded", () => {
       rejectedCount === 0 &&
       urlArray.some((u) => u.trim() !== "")
     ) {
-      addLogMessage("[INFO] No new subreddits were added.");
+      addLogMessage("[INFO] No new items were added.");
     }
     renderSubreddits();
   }
