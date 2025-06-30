@@ -52,6 +52,8 @@ async function updateYtDlp() {
     });
   });
 }
+const isDev = !app.isPackaged;
+
 const menuTemplate = [
   { label: "File", submenu: [{ role: "quit" }] },
   {
@@ -67,9 +69,66 @@ const menuTemplate = [
           });
         },
       },
+      {
+        label: "Check for Updates",
+        click: () => {
+          appLog("[INFO] Manual update check triggered.");
+          autoUpdater.checkForUpdatesAndNotify();
+        },
+      },
     ],
   },
 ];
+
+if (isDev) {
+  menuTemplate.push({
+    label: "Debug",
+    submenu: [
+      {
+        label: "Trigger Mock Update Available",
+        click: () => {
+          appLog("[DEBUG] Mock update available event triggered.");
+          if (mainWindow) {
+            mainWindow.webContents.send("update-notification", {
+              message: "[MOCK] App update available. Downloading...",
+              showRestart: false,
+            });
+          }
+        },
+      },
+      {
+        label: "Trigger Mock Update Download Progress",
+        click: () => {
+          appLog("[DEBUG] Mock update download progress event triggered.");
+          let percent = 0;
+          const interval = setInterval(() => {
+            percent += 10;
+            if (mainWindow) {
+              mainWindow.webContents.send("update-download-progress", {
+                percent,
+                transferred: percent * 1000,
+                total: 10000,
+                bytesPerSecond: 1000,
+              });
+            }
+            if (percent >= 100) {
+              clearInterval(interval);
+              setTimeout(() => {
+                if (mainWindow) {
+                  mainWindow.webContents.send("update-notification", {
+                    message:
+                      "[MOCK] App update downloaded. Restart to install.",
+                    showRestart: true,
+                  });
+                }
+              }, 500);
+            }
+          }, 300);
+        },
+      },
+    ],
+  });
+}
 async function createWindow() {
   const { default: StoreClass } = await import("electron-store");
   Store = StoreClass;
@@ -107,9 +166,17 @@ autoUpdater.on("update-available", (info) => {
     message: "App update available. Downloading...",
   });
 });
-autoUpdater.on("download-progress", (progressObj) =>
-  appLog(`[Updater] Downloading update: ${Math.round(progressObj.percent)}%`)
-);
+autoUpdater.on("download-progress", (progressObj) => {
+  appLog(`[Updater] Downloading update: ${Math.round(progressObj.percent)}%`);
+  if (mainWindow) {
+    mainWindow.webContents.send("update-download-progress", {
+      percent: progressObj.percent,
+      transferred: progressObj.transferred,
+      total: progressObj.total,
+      bytesPerSecond: progressObj.bytesPerSecond,
+    });
+  }
+});
 autoUpdater.on("update-downloaded", (info) => {
   appLog(`[Updater] Update v${info.version} downloaded.`);
   mainWindow.webContents.send("update-notification", {

@@ -41,6 +41,14 @@ document.addEventListener("DOMContentLoaded", () => {
   const addFromTextBtn = document.getElementById("add-from-text-btn");
   const clearCompletedBtn = document.getElementById("clear-completed-btn");
   const autoClearToggle = document.getElementById("auto-clear-toggle");
+  const updateProgressBarContainer = document.getElementById(
+    "update-progress-bar-container"
+  );
+  const updateProgressBarForeground = document.getElementById(
+    "update-progress-bar-foreground"
+  );
+  const updateProgressLabel = document.getElementById("update-progress-label");
+  const updateProgressValue = document.getElementById("update-progress-value");
 
   // ===== State Management =====
   let subreddits = [];
@@ -329,10 +337,26 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
+  window.api.onUpdateDownloadProgress?.((event, progress) => {
+    if (progress && typeof progress.percent === "number") {
+      updateProgressBarContainer.classList.remove("hidden");
+      updateProgressBarForeground.style.width = `${progress.percent}%`;
+      updateProgressLabel.textContent = `Downloading update...`;
+      updateProgressValue.textContent = `${Math.round(progress.percent)}%`;
+    }
+  });
+
   window.api.onUpdateNotification((event, { message, showRestart }) => {
     notificationMessage.textContent = message;
     notification.classList.remove("hidden");
     restartButton.classList.toggle("hidden", !showRestart);
+    // Hide progress bar if update is ready
+    if (showRestart) {
+      updateProgressBarContainer.classList.add("hidden");
+      updateProgressBarForeground.style.width = "0%";
+      updateProgressLabel.textContent = "";
+      updateProgressValue.textContent = "";
+    }
   });
 
   // ===== Initial Setup =====
