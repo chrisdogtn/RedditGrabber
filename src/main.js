@@ -162,6 +162,7 @@ ipcMain.on("stop-download", () => {
 ipcMain.on("skip-subreddit", () => {
   isSkipping = true;
 });
+ipcMain.handle("getYtDlpWhitelist", () => YT_DLP_HOSTS);
 
 // --- CORE DOWNLOADER LOGIC ---
 const BROWSER_USER_AGENT =
@@ -514,7 +515,14 @@ const YT_DLP_HOSTS = [
   "thisvid.com",
   "webmshare.com",
   "pmvhaven.com",
-  "ratedgross.com"
+  "ratedgross.com",
+  "pervertium.com",
+  "crazyshit.com",
+  "efukt.com",
+  "sissyhypno.com",
+  "boy18tube.com",
+  "cuteboytube.com",
+  "pornpawg.com",
 ];
 
 async function extractMediaUrlsFromPost(

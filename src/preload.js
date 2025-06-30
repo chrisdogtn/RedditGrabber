@@ -20,4 +20,5 @@ contextBridge.exposeInMainWorld("api", {
     ipcRenderer.on("update-notification", callback),
   onQueueProgress: (callback) => ipcRenderer.on("queue-progress", callback),
   onYtDlpProgress: (callback) => ipcRenderer.on("ytdlp-progress", callback),
+  getYtDlpWhitelist: () => ipcRenderer.invoke("getYtDlpWhitelist"),
 });
