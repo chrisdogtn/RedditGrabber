@@ -299,7 +299,6 @@ async function fetchAllMediaLinks(
   log(`[INFO] Scanning for up to ${options.maxLinks || "unlimited"} links...`);
 
   do {
-    
     if (isCancelled || isSkipping) {
       log(`[INFO] Scan for ${extractName(subredditUrl)} cancelled.`);
       break;
@@ -578,10 +577,12 @@ async function extractMediaUrlsFromPost(
           });
         });
       } else {
-        const directUrl =
-          postUrl.endsWith(".jpg") || postUrl.endsWith(".png")
-            ? postUrl
-            : `${postUrl}.jpg`;
+        let directUrl = postUrl;
+        if (postUrl.endsWith(".gifv")) {
+          directUrl = postUrl.replace(".gifv", ".mp4");
+        } else if (!postUrl.endsWith(".jpg") && !postUrl.endsWith(".png")) {
+          directUrl = `${postUrl}.jpg`;
+        }
         urls.push({
           url: directUrl,
           type: "image",
@@ -614,14 +615,6 @@ async function extractMediaUrlsFromPost(
           title: postTitle,
         });
       } else if (gifExtensions.includes(extension)) {
-        urls.push({
-          url: postUrl,
-          type: "gif",
-          downloader: "axios",
-          id: postId,
-          title: postTitle,
-        });
-      } else if (postUrl.endsWith(".gifv")) {
         urls.push({
           url: postUrl.replace(".gifv", ".mp4"),
           type: "video",
