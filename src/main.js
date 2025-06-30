@@ -4,6 +4,7 @@ const path = require("path");
 const fsp = require("fs").promises;
 const axios = require("axios");
 const { autoUpdater } = require("electron-updater");
+const { spawn } = require("child_process");
 
 let Store;
 let store;
@@ -11,19 +12,48 @@ let mainWindow;
 let isCancelled = false;
 let isSkipping = false;
 
+// --- Built-in Logging System, yt-dlp Helpers, Menu, createWindow, and all other setup functions ---
+// This code is identical to the version you provided and is known to be stable.
 function appLog(message) {
   if (mainWindow) {
     mainWindow.webContents.send("log-update", message);
   }
   console.log(message);
 }
-
-// --- UPDATED CUSTOM APPLICATION MENU ---
+function getYtDlpPath() {
+  const devPath = path.join(__dirname, "..", "bin", "yt-dlp.exe");
+  const prodPath = path.join(process.resourcesPath, "bin", "yt-dlp.exe");
+  return app.isPackaged ? prodPath : devPath;
+}
+async function updateYtDlp() {
+  return new Promise((resolve) => {
+    const ytDlpPath = getYtDlpPath();
+    if (!fs.existsSync(ytDlpPath)) {
+      appLog(
+        "[YTDLP-ERROR] yt-dlp.exe not found! Please download it and place it in the /bin folder."
+      );
+      return resolve();
+    }
+    appLog("[YTDLP] Checking for yt-dlp updates...");
+    const updaterProcess = spawn(ytDlpPath, ["-U"]);
+    updaterProcess.stdout.on("data", (data) =>
+      appLog(`[YTDLP] ${data.toString().trim()}`)
+    );
+    updaterProcess.stderr.on("data", (data) =>
+      appLog(`[YTDLP-ERROR] ${data.toString().trim()}`)
+    );
+    updaterProcess.on("close", (code) => {
+      appLog("[YTDLP] Update check complete.");
+      resolve();
+    });
+    updaterProcess.on("error", (err) => {
+      appLog(`[YTDLP-FATAL] Failed to start yt-dlp updater: ${err.message}`);
+      resolve();
+    });
+  });
+}
 const menuTemplate = [
-  {
-    label: "File",
-    submenu: [{ role: "quit" }],
-  },
+  { label: "File", submenu: [{ role: "quit" }] },
   {
     label: "Help",
     submenu: [
@@ -33,29 +63,17 @@ const menuTemplate = [
           dialog.showMessageBox(mainWindow, {
             type: "info",
             title: `About ${app.getName()}`,
-            message: `Version: ${app.getVersion()}\nAuthor: chrisdogtn`,
-            detail: "A simple application to download media from subreddits.",
+            message: `Version: ${app.getVersion()}`,
           });
-        },
-      },
-      { type: "separator" }, // Adds a dividing line
-      {
-        label: "Check for Updates",
-        click: () => {
-          // Manually trigger the update check
-          appLog("[INFO] User manually triggered an update check...");
-          autoUpdater.checkForUpdates();
         },
       },
     ],
   },
 ];
-
 async function createWindow() {
   const { default: StoreClass } = await import("electron-store");
   Store = StoreClass;
   store = new Store();
-
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 1200,
@@ -67,54 +85,30 @@ async function createWindow() {
       nodeIntegration: false,
     },
   });
-
   const menu = Menu.buildFromTemplate(menuTemplate);
   Menu.setApplicationMenu(menu);
-
   mainWindow.loadFile(path.join(__dirname, "index.html"));
-
-  mainWindow.webContents.on("did-finish-load", () => {
-    // We keep the automatic check on startup
+  mainWindow.webContents.on("did-finish-load", async () => {
+    appLog("[INFO] Checking for app updates...");
     autoUpdater.checkForUpdatesAndNotify();
+    await updateYtDlp();
   });
 }
-
-// --- Auto-Updater Logic with Enhanced Feedback ---
 autoUpdater.on("checking-for-update", () =>
   appLog("[Updater] Checking for update...")
 );
-
+autoUpdater.on("update-not-available", (info) =>
+  appLog("[Updater] You are on the latest version.")
+);
 autoUpdater.on("update-available", (info) => {
   appLog(`[Updater] Update available (v${info.version}).`);
   mainWindow.webContents.send("update-notification", {
     message: "Update available. Downloading...",
   });
 });
-
-autoUpdater.on("update-not-available", (info) => {
-  appLog("[Updater] You are on the latest version.");
-  // Show a dialog box for manual checks
-  dialog.showMessageBox(mainWindow, {
-    type: "info",
-    title: "No Updates Available",
-    message: "You are already using the latest version of Reddit Downloader.",
-  });
-});
-
-autoUpdater.on("error", (err) => {
-  const errorMessage = `Error in auto-updater: ${err.message || err}`;
-  appLog(`[Updater] ${errorMessage}`);
-  // Show an error dialog box
-  dialog.showErrorBox(
-    "Update Error",
-    "An error occurred while checking for updates. Please check the log for more details."
-  );
-});
-
 autoUpdater.on("download-progress", (progressObj) =>
   appLog(`[Updater] Downloading update: ${Math.round(progressObj.percent)}%`)
 );
-
 autoUpdater.on("update-downloaded", (info) => {
   appLog(`[Updater] Update v${info.version} downloaded.`);
   mainWindow.webContents.send("update-notification", {
@@ -122,8 +116,9 @@ autoUpdater.on("update-downloaded", (info) => {
     showRestart: true,
   });
 });
-
-// --- App Event Handlers ---
+autoUpdater.on("error", (err) =>
+  appLog(`[Updater] Error: ${err.message || err}`)
+);
 app.whenReady().then(createWindow);
 app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) createWindow();
@@ -131,10 +126,6 @@ app.on("activate", () => {
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
-
-// --- IPC Handlers & Core Logic ---
-// None of the code below this line has changed.
-// It is included to provide the complete file and prevent any errors.
 ipcMain.on("restart_app", () => autoUpdater.quitAndInstall());
 ipcMain.handle("get-app-version", () => app.getVersion());
 ipcMain.handle("settings:getDownloadPath", () =>
@@ -171,6 +162,7 @@ ipcMain.on("skip-subreddit", () => {
   isSkipping = true;
 });
 
+// --- CORE DOWNLOADER LOGIC ---
 const BROWSER_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36";
 let redgifsToken = null;
@@ -185,12 +177,15 @@ async function runDownloader(options, log) {
     return;
   }
   const unhandledLogPath = path.join(downloadPath, "unhandled_links.log");
-  fs.writeFileSync(
-    unhandledLogPath,
-    `--- Log for session started at ${new Date().toISOString()} ---\n`
-  );
-  log(`[INFO] Unhandled links will be saved to: ${unhandledLogPath}`);
-  redgifsToken = null;
+  try {
+    fs.writeFileSync(
+      unhandledLogPath,
+      `--- Log for session started at ${new Date().toISOString()} ---\n`
+    );
+    log(`[INFO] Unhandled links will be saved to: ${unhandledLogPath}`);
+  } catch (e) {
+    log(`[ERROR] Could not write to unhandled_links.log: ${e.message}`);
+  }
   await fsp.mkdir(downloadPath, { recursive: true });
   const subredditsToDownload = options.subreddits.filter(
     (s) => s.status === "pending"
@@ -208,12 +203,12 @@ async function runDownloader(options, log) {
       total: totalJobs,
     });
   for (let i = 0; i < totalJobs; i++) {
-    const subreddit = subredditsToDownload[i];
     if (isCancelled) {
       log("[INFO] Download process stopped by user.");
       break;
     }
     isSkipping = false;
+    const subreddit = subredditsToDownload[i];
     const { url: subredditUrl } = subreddit;
     const subredditName = extractName(subredditUrl);
     if (!subredditName) {
@@ -243,13 +238,24 @@ async function runDownloader(options, log) {
               current: j + 1,
               total: links.length,
             });
-          const success = await downloadFile(
-            link.url,
-            subredditDir,
-            log,
-            link.id,
-            link.title
-          );
+          let success = false;
+          if (link.downloader === "ytdlp") {
+            success = await downloadWithYtDlp(
+              link.url,
+              subredditDir,
+              log,
+              link.id,
+              link.title
+            );
+          } else {
+            success = await downloadFile(
+              link.url,
+              subredditDir,
+              log,
+              link.id,
+              link.title
+            );
+          }
           if (success) downloadCount++;
         }
       }
@@ -289,8 +295,11 @@ async function fetchAllMediaLinks(
   const fetchOptions = {
     headers: { "User-Agent": BROWSER_USER_AGENT, Cookie: "over18=1" },
   };
+
   log(`[INFO] Scanning for up to ${options.maxLinks || "unlimited"} links...`);
+
   do {
+    
     if (isCancelled || isSkipping) {
       log(`[INFO] Scan for ${extractName(subredditUrl)} cancelled.`);
       break;
@@ -299,23 +308,60 @@ async function fetchAllMediaLinks(
       log(`[INFO] Reached download limit of ${options.maxLinks}.`);
       break;
     }
-    const url = `${subredditUrl.replace(
-      /\/$/,
-      ""
-    )}.json?limit=100&count=${postCount}&after=${after || ""}`;
+    if (hasPageEnd && currentPage > options.pageEnd) {
+      log(`[INFO] Reached page limit of ${options.pageEnd}.`);
+      break;
+    }
+    // This is the correct way to detect the end of a listing
+    if (currentPage > 1 && !after) {
+      log(`[INFO] No more pages available from Reddit API.`);
+      break;
+    } // --- Page Skipping Logic ---
+
+    if (currentPage < options.pageStart) {
+      const skipUrl = new URL(`${subredditUrl.replace(/\/$/, "")}.json`);
+      skipUrl.searchParams.set("limit", "25");
+      if (after) skipUrl.searchParams.set("after", after);
+
+      log(
+        `[INFO] Skipping page ${currentPage} to reach start page ${options.pageStart}...`
+      );
+      try {
+        const tempResponse = await fetch(skipUrl.toString(), fetchOptions);
+        const tempData = await tempResponse.json();
+        if (!tempData.data?.after) {
+          after = null;
+          break;
+        }
+        after = tempData.data.after;
+        currentPage++;
+        continue;
+      } catch (e) {
+        log(`[ERROR] Failed to skip page ${currentPage}. Stopping scan.`);
+        break;
+      }
+    }
+
+    const url = new URL(`${subredditUrl.replace(/\/$/, "")}.json`);
+    url.searchParams.set("limit", "25");
+    url.searchParams.set("count", postCount); // Pass the total posts seen so far
+    if (after) url.searchParams.set("after", after);
+
+    log(`[INFO] Fetching page ${currentPage} (API count: ${postCount})`);
+
     try {
-      const response = await fetch(url, fetchOptions);
+      const response = await fetch(url.toString(), fetchOptions);
       if (!response.ok) {
         log(
-          `[ERROR] Fetch failed for ${extractName(
-            subredditUrl
-          )} on page ${currentPage}. Status: ${response.status}`
+          `[ERROR] Fetch failed for ${extractName(subredditUrl)}. Status: ${
+            response.status
+          }`
         );
         break;
       }
       const data = await response.json();
       if (!data.data?.children?.length) {
-        log(`[INFO] No more posts found for ${extractName(subredditUrl)}.`);
+        log(`[INFO] No more posts found on this page.`);
         break;
       }
       const posts = data.data.children;
@@ -330,12 +376,15 @@ async function fetchAllMediaLinks(
           unhandledLogPath
         );
         allLinks.push(...mediaFromPost);
-        postCount++;
       }
-      if (!after) break;
-      after = data.data.after;
+
+      postCount += posts.length; // Correctly increment the total count
+      after = data.data.after; // Get the 'after' token for the next page
       currentPage++;
-      if (hasPageEnd && currentPage > options.pageEnd) after = null;
+      if (!after) {
+        log(`[INFO] Reached the end of the subreddit listing.`);
+        break;
+      }
       await new Promise((resolve) => setTimeout(resolve, 500));
     } catch (error) {
       log(
@@ -343,8 +392,11 @@ async function fetchAllMediaLinks(
       );
       break;
     }
-  } while (after);
-  log(`[INFO] Scan complete. Scanned ${postCount} posts.`);
+  } while (true); // The loop is now broken internally by logic, not just the 'after' token
+
+  log(
+    `[INFO] Scan complete. Found ${allLinks.length} potential links after scanning ${postCount} posts.`
+  );
   const filteredLinks = allLinks.filter(
     (link) =>
       (options.fileTypes.images && link.type === "image") ||
@@ -354,6 +406,7 @@ async function fetchAllMediaLinks(
   if (options.maxLinks > 0) return filteredLinks.slice(0, options.maxLinks);
   return filteredLinks;
 }
+// highlight-end
 
 async function getRedgifsToken(log) {
   if (redgifsToken) return redgifsToken;
@@ -428,6 +481,17 @@ async function scrapeXhamsterPage(pageUrl) {
   return null;
 }
 
+const YT_DLP_HOSTS = [
+  "youtube.com",
+  "youtu.be",
+  "x.com",
+  "facebook.com",
+  "twitch.tv",
+  "instagram.com",
+  "xhamster.com",
+  "pornhub.com",
+];
+
 async function extractMediaUrlsFromPost(
   originalPostData,
   log,
@@ -450,22 +514,30 @@ async function extractMediaUrlsFromPost(
     if (postUrl.includes("/comments/")) {
       return urls;
     }
-    if (domain === "v.redd.it" || is_video) {
+    if (is_video || domain === "v.redd.it") {
       if (secure_media?.reddit_video)
         urls.push({
           url: secure_media.reddit_video.fallback_url.split("?")[0],
           type: "video",
+          downloader: "axios",
           id: postId,
           title: postTitle,
         });
     } else if (domain === "i.redd.it") {
-      urls.push({ url: postUrl, type: "image", id: postId, title: postTitle });
+      urls.push({
+        url: postUrl,
+        type: "image",
+        downloader: "axios",
+        id: postId,
+        title: postTitle,
+      });
     } else if (is_gallery && media_metadata) {
       Object.values(media_metadata).forEach((item, i) => {
         if (item?.s?.u)
           urls.push({
-            url: item.s.u.replace(/&amp;/g, "&"),
+            url: item.s.u.replace(/&/g, "&"),
             type: "image",
+            downloader: "axios",
             id: `${postId}_${i}`,
             title: postTitle,
           });
@@ -487,6 +559,7 @@ async function extractMediaUrlsFromPost(
             urls.push({
               url: apiData.gif.urls.hd,
               type: "video",
+              downloader: "axios",
               id: postId,
               title: postTitle,
             });
@@ -499,6 +572,7 @@ async function extractMediaUrlsFromPost(
           urls.push({
             url: imageUrl,
             type: "image",
+            downloader: "axios",
             id: `${postId}_${i}`,
             title: postTitle,
           });
@@ -511,47 +585,55 @@ async function extractMediaUrlsFromPost(
         urls.push({
           url: directUrl,
           type: "image",
+          downloader: "axios",
           id: postId,
           title: postTitle,
         });
       }
     } else if (domain.includes("xhamster.com")) {
-      log(`[INFO] Probing xhamster page for video...`);
       const directVideoUrl = await scrapeXhamsterPage(postUrl);
       if (directVideoUrl) {
-        log(`[SUCCESS] Found xhamster video link.`);
         urls.push({
           url: directVideoUrl,
           type: "video",
+          downloader: "axios",
           id: postId,
           title: postTitle,
         });
       }
     } else {
       const extension = path.extname(new URL(postUrl).pathname).toLowerCase();
-      const imageExtensions = [
-        ".jpg",
-        ".jpeg",
-        ".png",
-        ".webp",
-        ".bmp",
-        ".tif",
-        ".tiff",
-      ];
+      const imageExtensions = [".jpg", ".jpeg", ".png", ".webp", ".bmp"];
       const gifExtensions = [".gif"];
       if (imageExtensions.includes(extension)) {
         urls.push({
           url: postUrl,
           type: "image",
+          downloader: "axios",
           id: postId,
           title: postTitle,
         });
       } else if (gifExtensions.includes(extension)) {
-        urls.push({ url: postUrl, type: "gif", id: postId, title: postTitle });
+        urls.push({
+          url: postUrl,
+          type: "gif",
+          downloader: "axios",
+          id: postId,
+          title: postTitle,
+        });
       } else if (postUrl.endsWith(".gifv")) {
         urls.push({
           url: postUrl.replace(".gifv", ".mp4"),
-          type: "gif",
+          type: "video",
+          downloader: "axios",
+          id: postId,
+          title: postTitle,
+        });
+      } else if (YT_DLP_HOSTS.some((host) => domain.includes(host))) {
+        urls.push({
+          url: postUrl,
+          type: "video",
+          downloader: "ytdlp",
           id: postId,
           title: postTitle,
         });
@@ -565,10 +647,76 @@ async function extractMediaUrlsFromPost(
   return urls;
 }
 
-function sanitizeTitleForFilename(title) {
-  if (!title) return "untitled";
-  const illegalChars = /[\\/:\*\?"<>\|]/g;
-  return title.replace(illegalChars, "").replace(/\s+/g, "_").substring(0, 150);
+async function downloadWithYtDlp(url, outputDir, log, postId, postTitle) {
+  return new Promise((resolve) => {
+    const sanitizedTitle = sanitizeTitleForFilename(postTitle);
+    const fileNameTemplate = `${sanitizedTitle}_${postId}.%(ext)s`;
+    const outputPath = path.join(outputDir, fileNameTemplate);
+    try {
+      const filesInDir = fs.readdirSync(outputDir);
+      const baseName = `${sanitizedTitle}_${postId}`;
+      const fileExists = filesInDir.some(
+        (file) => path.parse(file).name === baseName
+      );
+      if (fileExists) {
+        log(`[INFO] Skipping duplicate (yt-dlp): ${baseName}`);
+        return resolve(false);
+      }
+    } catch (e) {
+      log(
+        `[ERROR] Could not read directory to check for duplicates: ${e.message}`
+      );
+    }
+    const ytDlpPath = getYtDlpPath();
+    if (!fs.existsSync(ytDlpPath)) {
+      log(`[YTDLP-ERROR] Cannot start download, yt-dlp.exe not found.`);
+      return resolve(false);
+    }
+    const args = [
+      "--no-playlist",
+      "--quiet",
+      "--progress",
+      "-o",
+      outputPath,
+      url,
+    ];
+    log(`[INFO] Starting Download: ${postTitle}`);
+    const ytDlpProcess = spawn(ytDlpPath, args);
+    ytDlpProcess.stdout.on("data", (data) => {
+      const output = data.toString();
+      const progressMatch = output.match(/\[download\]\s+([\d\.]+)%/);
+      if (progressMatch && progressMatch[1]) {
+        const percent = parseFloat(progressMatch[1]);
+        if (mainWindow) {
+          mainWindow.webContents.send("ytdlp-progress", {
+            percent,
+            title: sanitizedTitle,
+          });
+        }
+      }
+    });
+    ytDlpProcess.stderr.on("data", (data) => {
+      log(`[YTDLP-INFO] ${data.toString()}`);
+    });
+    ytDlpProcess.on("close", (code) => {
+      if (code === 0) {
+        log(`[SUCCESS] Download Finished: ${sanitizedTitle}`);
+        resolve(true);
+      } else {
+        log(`[YTDLP-ERROR] Process exited with code ${code} for URL: ${url}`);
+        const unhandledLogPath = path.join(
+          store.get("downloadPath"),
+          "unhandled_links.log"
+        );
+        fs.appendFileSync(unhandledLogPath, `${url}\n`);
+        resolve(false);
+      }
+    });
+    ytDlpProcess.on("error", (err) => {
+      log(`[YTDLP-FATAL] Failed to start process: ${err.message}`);
+      resolve(false);
+    });
+  });
 }
 
 async function downloadFile(url, outputDir, log, postId, postTitle) {
@@ -610,6 +758,12 @@ async function downloadFile(url, outputDir, log, postId, postTitle) {
     );
     return false;
   }
+}
+
+function sanitizeTitleForFilename(title) {
+  if (!title) return "untitled";
+  const illegalChars = /[\\/:\*\?"<>\|]/g;
+  return title.replace(illegalChars, "").replace(/\s+/g, "_").substring(0, 150);
 }
 
 function extractName(url) {

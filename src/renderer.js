@@ -120,9 +120,7 @@ document.addEventListener("DOMContentLoaded", () => {
       rejectedCount === 0 &&
       urlArray.some((u) => u.trim() !== "")
     ) {
-      addLogMessage(
-        "[INFO] No new subreddits were added (all items were empty or duplicates)."
-      );
+      addLogMessage("[INFO] No new subreddits were added.");
     }
     renderSubreddits();
   }
@@ -275,6 +273,14 @@ document.addEventListener("DOMContentLoaded", () => {
     progressBar.style.width = `${percentage}%`;
     progressValue.textContent = `${percentage}%`;
     progressLabel.textContent = `Downloading ${current} of ${total}...`;
+  });
+
+  window.api.onYtDlpProgress((event, { percent, title }) => {
+    progressBar.classList.remove("indeterminate");
+    const percentage = Math.round(percent);
+    progressBar.style.width = `${percentage}%`;
+    progressValue.textContent = `${percentage}%`;
+    progressLabel.textContent = `Downloading: ${title}`;
   });
 
   window.api.onQueueProgress((event, { current, total }) => {
