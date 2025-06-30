@@ -34,7 +34,7 @@ async function updateYtDlp() {
       );
       return resolve();
     }
-    appLog("[YTDLP] Checking for yt-dlp updates...");
+    appLog("App updating...");
     const updaterProcess = spawn(ytDlpPath, ["-U"]);
     updaterProcess.stdout.on("data", (data) =>
       appLog(`[YTDLP] ${data.toString().trim()}`)
@@ -92,10 +92,11 @@ async function createWindow() {
     appLog("[INFO] Checking for app updates...");
     autoUpdater.checkForUpdatesAndNotify();
     await updateYtDlp();
+    appLog("[INFO] Ready.");
   });
 }
 autoUpdater.on("checking-for-update", () =>
-  appLog("[Updater] Checking for update...")
+  appLog("[INFO] Checking for app updates...")
 );
 autoUpdater.on("update-not-available", (info) =>
   appLog("[Updater] You are on the latest version.")
@@ -103,7 +104,7 @@ autoUpdater.on("update-not-available", (info) =>
 autoUpdater.on("update-available", (info) => {
   appLog(`[Updater] Update available (v${info.version}).`);
   mainWindow.webContents.send("update-notification", {
-    message: "Update available. Downloading...",
+    message: "App update available. Downloading...",
   });
 });
 autoUpdater.on("download-progress", (progressObj) =>
@@ -112,7 +113,7 @@ autoUpdater.on("download-progress", (progressObj) =>
 autoUpdater.on("update-downloaded", (info) => {
   appLog(`[Updater] Update v${info.version} downloaded.`);
   mainWindow.webContents.send("update-notification", {
-    message: "Update downloaded. Restart to install.",
+    message: "App update downloaded. Restart to install.",
     showRestart: true,
   });
 });
@@ -534,7 +535,7 @@ async function extractMediaUrlsFromPost(
       Object.values(media_metadata).forEach((item, i) => {
         if (item?.s?.u)
           urls.push({
-            url: item.s.u.replace(/&/g, "&"),
+            url: item.s.u.replace(/&amp;/g, "&"),
             type: "image",
             downloader: "axios",
             id: `${postId}_${i}`,
