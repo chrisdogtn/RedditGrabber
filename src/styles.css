@@ -78,7 +78,7 @@ h3 {
   color: var(--color-text-secondary);
   font-size: 0.9rem;
   font-weight: 500;
-  margin: -16px 0 32px 4px;
+  margin: -16px 0 0px 4px;
 }
 
 .add-panel textarea {

@@ -76,9 +76,9 @@ async function createWindow() {
   store = new Store();
   mainWindow = new BrowserWindow({
     width: 1400,
-    height: 1200,
+    height: 905,
     minWidth: 940,
-    minHeight: 700,
+    minHeight: 900,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -490,6 +490,11 @@ const YT_DLP_HOSTS = [
   "instagram.com",
   "xhamster.com",
   "pornhub.com",
+  "hypnotube.com",
+  "xvideos.com",
+  "twitter.com",
+  "thisvid.com",
+  "webmshare.com",
 ];
 
 async function extractMediaUrlsFromPost(
