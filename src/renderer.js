@@ -49,6 +49,7 @@ document.addEventListener("DOMContentLoaded", () => {
   );
   const updateProgressLabel = document.getElementById("update-progress-label");
   const updateProgressValue = document.getElementById("update-progress-value");
+  const downloadsLogArea = document.getElementById("downloads-log-area");
 
   // ===== State Management =====
   let subreddits = [];
@@ -361,6 +362,33 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
+  // ===== Download Queue Display =====
+  function updateDownloadsDisplay(activeDownloads) {
+    if (!downloadsLogArea) return;
+    
+    if (activeDownloads.length === 0) {
+      downloadsLogArea.innerHTML = '<p class="no-downloads">No Current Downloads...</p>';
+    } else {
+      const downloadsList = document.createElement('ul');
+      downloadsList.className = 'downloads-list';
+      
+      activeDownloads.forEach(download => {
+        const listItem = document.createElement('li');
+        listItem.className = 'download-item';
+        listItem.textContent = download.name;
+        downloadsList.appendChild(listItem);
+      });
+      
+      downloadsLogArea.innerHTML = '';
+      downloadsLogArea.appendChild(downloadsList);
+    }
+  }
+
+  // Listen for download queue updates
+  window.api.onDownloadQueueUpdated((event, activeDownloads) => {
+    updateDownloadsDisplay(activeDownloads);
+  });
+
   // ===== Initial Setup =====
   async function loadInitialSettings() {
     const savedPath = await window.api.getDownloadPath();
@@ -368,6 +396,9 @@ document.addEventListener("DOMContentLoaded", () => {
     addLogMessage(
       "[INFO] Welcome! Choose a download location, then add subreddits."
     );
+    
+    // Initialize downloads display
+    updateDownloadsDisplay([]);
   }
   loadInitialSettings();
 });

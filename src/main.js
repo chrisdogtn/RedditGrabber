@@ -16,6 +16,9 @@ let isSkipping = false;
 let activeProcesses = new Set();
 let activeAxiosControllers = new Set();
 
+// Track active downloads for queue display
+let activeDownloads = [];
+
 function appLog(message) {
   if (mainWindow) {
     mainWindow.webContents.send("log-update", message);
@@ -272,7 +275,7 @@ ipcMain.on("stop-download", () => {
   });
   activeProcesses.clear();
 
-  // Clear progress bars
+  // Clear progress bars and download queue
   if (mainWindow) {
     mainWindow.webContents.send("download-progress", {
       current: 0,
@@ -284,12 +287,50 @@ ipcMain.on("stop-download", () => {
     });
   }
 
+  // Clear the download queue when stopping
+  clearDownloadQueue();
+
   appLog("[INFO] Stop signal sent to all active downloads.");
 });
 ipcMain.on("skip-subreddit", () => {
   isSkipping = true;
 });
 ipcMain.handle("getYtDlpWhitelist", () => YT_DLP_HOSTS);
+
+// Download queue management functions
+function addToDownloadQueue(url, title, id) {
+  const downloadItem = {
+    id: id || `${Date.now()}_${Math.random()}`,
+    name: sanitizeTitleForFilename(title) || url,
+    status: 'downloading',
+    startTime: Date.now()
+  };
+  activeDownloads.push(downloadItem);
+  notifyDownloadQueueUpdated();
+  return downloadItem.id;
+}
+
+function removeFromDownloadQueue(id) {
+  const index = activeDownloads.findIndex(item => item.id === id);
+  if (index !== -1) {
+    activeDownloads.splice(index, 1);
+    notifyDownloadQueueUpdated();
+  }
+}
+
+function notifyDownloadQueueUpdated() {
+  if (mainWindow) {
+    mainWindow.webContents.send("download-queue-updated", activeDownloads);
+  }
+}
+
+function clearDownloadQueue() {
+  activeDownloads = [];
+  notifyDownloadQueueUpdated();
+}
+
+// IPC handlers for download queue
+ipcMain.handle("get-active-downloads", () => activeDownloads);
 
 // --- CORE DOWNLOADER LOGIC ---
 const BROWSER_USER_AGENT =
@@ -1542,6 +1583,10 @@ async function downloadWithYtDlp(
       url,
     ];
     log(`[INFO] Starting Download: ${postTitle}`);
+    
+    // Add to download queue
+    const queueId = addToDownloadQueue(url, postTitle, postId);
+    
     const ytDlpProcess = spawn(ytDlpPath, args);
 
     // Track this process for hard stop functionality
@@ -1566,6 +1611,9 @@ async function downloadWithYtDlp(
     ytDlpProcess.on("close", (code) => {
       // Remove from active processes when done
       activeProcesses.delete(ytDlpProcess);
+      
+      // Remove from download queue
+      removeFromDownloadQueue(queueId);
 
       if (isCancelled) {
         log(`[INFO] Download cancelled: ${sanitizedTitle}`);
@@ -1605,6 +1653,9 @@ async function downloadFile(url, outputDir, log, postId, postTitle) {
     const outputPath = path.join(outputDir, fileName);
     if (fs.existsSync(outputPath)) return false;
 
+    // Add to download queue
+    const queueId = addToDownloadQueue(url, postTitle, postId);
+
     // Create abort controller for cancellation
     const controller = new AbortController();
     activeAxiosControllers.add(controller);
@@ -1622,11 +1673,15 @@ async function downloadFile(url, outputDir, log, postId, postTitle) {
     return new Promise((resolve) => {
       writer.on("finish", () => {
         activeAxiosControllers.delete(controller);
+        // Remove from download queue
+        removeFromDownloadQueue(queueId);
         log(`[SUCCESS] Downloaded: ${fileName}`);
         resolve(true);
       });
       writer.on("error", (err) => {
         activeAxiosControllers.delete(controller);
+        // Remove from download queue
+        removeFromDownloadQueue(queueId);
         log(`[ERROR] Failed to save ${fileName}: ${err.message}`);
         try {
           fs.unlinkSync(outputPath);
@@ -1637,6 +1692,8 @@ async function downloadFile(url, outputDir, log, postId, postTitle) {
       // Handle cancellation
       controller.signal.addEventListener("abort", () => {
         activeAxiosControllers.delete(controller);
+        // Remove from download queue
+        removeFromDownloadQueue(queueId);
         writer.destroy();
         try {
           fs.unlinkSync(outputPath);

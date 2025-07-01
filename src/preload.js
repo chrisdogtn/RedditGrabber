@@ -23,4 +23,9 @@ contextBridge.exposeInMainWorld("api", {
   onUpdateDownloadProgress: (callback) =>
     ipcRenderer.on("update-download-progress", callback),
   getYtDlpWhitelist: () => ipcRenderer.invoke("getYtDlpWhitelist"),
+
+  // Download queue management
+  getActiveDownloads: () => ipcRenderer.invoke("get-active-downloads"),
+  onDownloadQueueUpdated: (callback) =>
+    ipcRenderer.on("download-queue-updated", callback),
 });
