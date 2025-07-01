@@ -24,8 +24,6 @@ h3 {
   font-weight: 700;
 }
 
-
-
 .section-title {
   color: var(--color-text-secondary);
   text-transform: uppercase;
@@ -327,9 +325,11 @@ button.danger:hover {
   justify-content: space-between;
   font-size: 0.9rem;
   margin-bottom: 8px;
+  text-overflow: ellipsis;
 }
 #progress-label {
   color: var(--color-text-secondary);
+  text-overflow: ellipsis;
 }
 #progress-value {
   font-weight: 700;
@@ -413,21 +413,27 @@ button.danger:hover {
 }
 
 #log-area {
-  /* flex-grow: 1; */
+  flex-grow: 1;
   overflow-y: hidden;
   font-size: 0.85rem;
   line-height: 1.6;
   padding: 8px 16px;
   max-height: 52vh;
-  width: 50%;
+
 }
 #downloads-log-area {
-  /* flex-grow: 1; */
+  flex-grow: 1;
   overflow-y: hidden;
   font-size: 0.85rem;
   line-height: 1.6;
   padding: 8px 16px;
   max-height: 52vh;
+
+}
+
+.log-section {
+  width: 50%;
+  
 }
 
 .log-sections {
@@ -542,7 +548,7 @@ button.danger:hover {
 
 .download-progress-foreground {
   height: 100%;
-  background: linear-gradient(90deg, #00f5d4, #00b3a7);
+  background: linear-gradient(90deg, #dd3a3a, #00b32d);
   border-radius: 6px;
   transition: width 0.3s ease-out;
   min-width: 2px;
