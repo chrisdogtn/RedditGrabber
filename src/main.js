@@ -12,6 +12,10 @@ let mainWindow;
 let isCancelled = false;
 let isSkipping = false;
 
+// Track active processes and downloads for hard stop functionality
+let activeProcesses = new Set();
+let activeAxiosControllers = new Set();
+
 function appLog(message) {
   if (mainWindow) {
     mainWindow.webContents.send("log-update", message);
@@ -223,6 +227,64 @@ ipcMain.handle("dialog:openFile", async () => {
 });
 ipcMain.on("stop-download", () => {
   isCancelled = true;
+
+  appLog(
+    `[INFO] Stop command received. Active processes: ${activeProcesses.size}, Active requests: ${activeAxiosControllers.size}`
+  );
+
+  // Cancel all active axios requests first
+  activeAxiosControllers.forEach((controller) => {
+    try {
+      controller.abort();
+      appLog(`[INFO] Aborted an HTTP request.`);
+    } catch (err) {
+      appLog(`[INFO] Failed to abort request: ${err.message}`);
+    }
+  });
+  activeAxiosControllers.clear();
+
+  // Kill all active yt-dlp processes
+  activeProcesses.forEach((childProcess) => {
+    if (childProcess && !childProcess.killed && childProcess.pid) {
+      appLog(`[INFO] Terminating process with PID: ${childProcess.pid}`);
+      if (process.platform === "win32") {
+        // Use taskkill on Windows to forcefully terminate the process and its children
+        const { spawn } = require("child_process");
+        const kill = spawn("taskkill", ["/pid", childProcess.pid, "/f", "/t"]);
+        kill.on("close", (code) => {
+          if (code !== 0) {
+            appLog(
+              `[WARN] taskkill for PID ${childProcess.pid} exited with code ${code}. The process may not have been terminated.`
+            );
+          }
+        });
+        kill.on("error", (err) => {
+          appLog(
+            `[ERROR] Failed to execute taskkill for PID ${childProcess.pid}: ${err.message}`
+          );
+        });
+      } else {
+        // On macOS and Linux, SIGKILL is effective.
+        childProcess.kill("SIGKILL");
+        appLog(`[INFO] Sent SIGKILL to process with PID: ${childProcess.pid}`);
+      }
+    }
+  });
+  activeProcesses.clear();
+
+  // Clear progress bars
+  if (mainWindow) {
+    mainWindow.webContents.send("download-progress", {
+      current: 0,
+      total: 0,
+    });
+    mainWindow.webContents.send("queue-progress", {
+      current: 0,
+      total: 0,
+    });
+  }
+
+  appLog("[INFO] Stop signal sent to all active downloads.");
 });
 ipcMain.on("skip-subreddit", () => {
   isSkipping = true;
@@ -238,6 +300,10 @@ async function runDownloader(options, log) {
   log(`[INFO] Starting download process...`);
   isCancelled = false;
   isSkipping = false;
+
+  // Clear any previous active processes/controllers
+  activeProcesses.clear();
+  activeAxiosControllers.clear();
   const downloadPath = store.get("downloadPath");
   if (!downloadPath) {
     log("[ERROR] Download location not set.");
@@ -327,9 +393,9 @@ async function runDownloader(options, log) {
   downloadJobs.forEach((job) => (job.started = false));
 
   async function tryStartDownloads() {
-    while (activeCount < MAX_SIMULTANEOUS_DOWNLOADS) {
+    while (activeCount < MAX_SIMULTANEOUS_DOWNLOADS && !isCancelled) {
       // Find the next eligible job: not started, domain not active
-      const nextJob = downloadJobs.find(job => {
+      const nextJob = downloadJobs.find((job) => {
         if (job.started) return false;
         const match = job.link.url.match(/https?:\/\/(?:www\.)?([^\/]+)/i);
         const domain = match ? match[1] : "other";
@@ -343,6 +409,14 @@ async function runDownloader(options, log) {
       activeCount++;
       // Start the download
       (async () => {
+        // Check for cancellation before starting
+        if (isCancelled) {
+          completedCount++;
+          activeDomains.delete(domain);
+          activeCount--;
+          return;
+        }
+
         let success = false;
         if (nextJob.link.downloader === "ytdlp") {
           success = await downloadWithYtDlp(
@@ -365,8 +439,15 @@ async function runDownloader(options, log) {
         completedCount++;
         activeDomains.delete(domain);
         activeCount--;
-        if (mainWindow) {
+
+        // Skip progress updates if cancelled
+        if (!isCancelled && mainWindow) {
           mainWindow.webContents.send("download-progress", {
+            current: completedCount,
+            total: totalLinks,
+          });
+          // Update the overall queue progress bar after each download
+          mainWindow.webContents.send("queue-progress", {
             current: completedCount,
             total: totalLinks,
           });
@@ -381,8 +462,10 @@ async function runDownloader(options, log) {
             });
           }
         }
-        // Try to start more downloads if possible
-        await tryStartDownloads();
+        // Try to start more downloads if possible (unless cancelled)
+        if (!isCancelled) {
+          await tryStartDownloads();
+        }
       })();
     }
   }
@@ -392,6 +475,12 @@ async function runDownloader(options, log) {
   // Wait for all downloads to finish
   while (completedCount < totalLinks && !isCancelled && !isSkipping) {
     await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+
+  if (isCancelled) {
+    log("--- DOWNLOADS CANCELLED BY USER ---");
+  } else if (isSkipping) {
+    log("--- DOWNLOADS SKIPPED BY USER ---");
   }
 }
 
@@ -1454,6 +1543,10 @@ async function downloadWithYtDlp(
     ];
     log(`[INFO] Starting Download: ${postTitle}`);
     const ytDlpProcess = spawn(ytDlpPath, args);
+
+    // Track this process for hard stop functionality
+    activeProcesses.add(ytDlpProcess);
+
     ytDlpProcess.stdout.on("data", (data) => {
       const output = data.toString();
       const progressMatch = output.match(/\[download\]\s+([\d\.]+)%/);
@@ -1471,6 +1564,15 @@ async function downloadWithYtDlp(
       log(`[YTDLP-INFO] ${data.toString()}`);
     });
     ytDlpProcess.on("close", (code) => {
+      // Remove from active processes when done
+      activeProcesses.delete(ytDlpProcess);
+
+      if (isCancelled) {
+        log(`[INFO] Download cancelled: ${sanitizedTitle}`);
+        resolve(false);
+        return;
+      }
+
       if (code === 0) {
         log(`[SUCCESS] Download Finished: ${sanitizedTitle}`);
         resolve(true);
@@ -1485,6 +1587,8 @@ async function downloadWithYtDlp(
       }
     });
     ytDlpProcess.on("error", (err) => {
+      // Remove from active processes on error
+      activeProcesses.delete(ytDlpProcess);
       log(`[YTDLP-FATAL] Failed to start process: ${err.message}`);
       resolve(false);
     });
@@ -1500,29 +1604,52 @@ async function downloadFile(url, outputDir, log, postId, postTitle) {
     const fileName = `${sanitizedTitle}_${postId}${extension}`;
     const outputPath = path.join(outputDir, fileName);
     if (fs.existsSync(outputPath)) return false;
+
+    // Create abort controller for cancellation
+    const controller = new AbortController();
+    activeAxiosControllers.add(controller);
+
     const response = await axios({
       method: "GET",
       url: url,
       responseType: "stream",
       timeout: 30000,
       headers: { "User-Agent": BROWSER_USER_AGENT },
+      signal: controller.signal,
     });
     const writer = fs.createWriteStream(outputPath);
     response.data.pipe(writer);
     return new Promise((resolve) => {
       writer.on("finish", () => {
+        activeAxiosControllers.delete(controller);
         log(`[SUCCESS] Downloaded: ${fileName}`);
         resolve(true);
       });
       writer.on("error", (err) => {
+        activeAxiosControllers.delete(controller);
         log(`[ERROR] Failed to save ${fileName}: ${err.message}`);
         try {
           fs.unlinkSync(outputPath);
         } catch {}
         resolve(false);
       });
+
+      // Handle cancellation
+      controller.signal.addEventListener("abort", () => {
+        activeAxiosControllers.delete(controller);
+        writer.destroy();
+        try {
+          fs.unlinkSync(outputPath);
+        } catch {}
+        log(`[INFO] Download cancelled: ${fileName}`);
+        resolve(false);
+      });
     });
   } catch (error) {
+    if (error.name === "AbortError" || error.code === "ABORT_ERR") {
+      log(`[INFO] Download cancelled: ${url}`);
+      return false;
+    }
     log(
       `[ERROR] Download failed for ${url}. Reason: ${
         error.response?.status || error.code
