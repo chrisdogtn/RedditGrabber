@@ -303,11 +303,20 @@ function addToDownloadQueue(url, title, id) {
     id: id || `${Date.now()}_${Math.random()}`,
     name: sanitizeTitleForFilename(title) || url,
     status: 'downloading',
-    startTime: Date.now()
+    startTime: Date.now(),
+    progress: 0
   };
   activeDownloads.push(downloadItem);
   notifyDownloadQueueUpdated();
   return downloadItem.id;
+}
+
+function updateDownloadProgress(id, progress) {
+  const download = activeDownloads.find(item => item.id === id);
+  if (download) {
+    download.progress = progress;
+    notifyDownloadQueueUpdated();
+  }
 }
 
 function removeFromDownloadQueue(id) {
@@ -1597,6 +1606,8 @@ async function downloadWithYtDlp(
       const progressMatch = output.match(/\[download\]\s+([\d\.]+)%/);
       if (progressMatch && progressMatch[1]) {
         const percent = parseFloat(progressMatch[1]);
+        // Update individual download progress
+        updateDownloadProgress(queueId, percent);
         if (mainWindow) {
           mainWindow.webContents.send("ytdlp-progress", {
             percent,
@@ -1667,6 +1678,12 @@ async function downloadFile(url, outputDir, log, postId, postTitle) {
       timeout: 30000,
       headers: { "User-Agent": BROWSER_USER_AGENT },
       signal: controller.signal,
+      onDownloadProgress: (progressEvent) => {
+        if (progressEvent.total) {
+          const percent = Math.round((progressEvent.loaded / progressEvent.total) * 100);
+          updateDownloadProgress(queueId, percent);
+        }
+      }
     });
     const writer = fs.createWriteStream(outputPath);
     response.data.pipe(writer);

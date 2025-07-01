@@ -24,10 +24,7 @@ h3 {
   font-weight: 700;
 }
 
-.log-sections {
-  display: flex;
-  gap: 16px;
-}
+
 
 .section-title {
   color: var(--color-text-secondary);
@@ -416,21 +413,29 @@ button.danger:hover {
 }
 
 #log-area {
-  flex-grow: 1;
+  /* flex-grow: 1; */
   overflow-y: hidden;
   font-size: 0.85rem;
   line-height: 1.6;
   padding: 8px 16px;
   max-height: 52vh;
+  width: 50%;
 }
 #downloads-log-area {
-  flex-grow: 1;
+  /* flex-grow: 1; */
   overflow-y: hidden;
   font-size: 0.85rem;
   line-height: 1.6;
   padding: 8px 16px;
   max-height: 52vh;
 }
+
+.log-sections {
+  display: flex;
+  gap: 16px;
+  width: 100%;
+}
+
 .log-message {
   padding: 2px 0;
   border-bottom: 1px solid var(--color-border);
@@ -490,4 +495,65 @@ button.danger:hover {
 ::-webkit-scrollbar-thumb:hover {
   background: #555;
   background-clip: content-box;
+}
+
+/* ===== Download Queue Styles ===== */
+.no-downloads {
+  color: #666;
+  font-style: italic;
+  text-align: center;
+  padding: 20px;
+}
+
+.downloads-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.download-item {
+  background-color: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 8px;
+  border-left: 3px solid var(--color-primary);
+}
+
+.download-name {
+  font-size: 0.9rem;
+  color: var(--color-text-primary);
+  margin-bottom: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.download-progress-container {
+  position: relative;
+}
+
+.download-progress-background {
+  width: 100%;
+  height: 12px;
+  background-color: rgba(0, 0, 0, 0.4);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.download-progress-foreground {
+  height: 100%;
+  background: linear-gradient(90deg, #00f5d4, #00b3a7);
+  border-radius: 6px;
+  transition: width 0.3s ease-out;
+  min-width: 2px;
+}
+
+.download-progress-text {
+  position: absolute;
+  top: 0;
+  right: 0;
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  line-height: 12px;
+  margin-right: 4px;
 }

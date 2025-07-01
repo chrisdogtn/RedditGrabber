@@ -375,7 +375,36 @@ document.addEventListener("DOMContentLoaded", () => {
       activeDownloads.forEach(download => {
         const listItem = document.createElement('li');
         listItem.className = 'download-item';
-        listItem.textContent = download.name;
+        
+        // Create download name
+        const nameDiv = document.createElement('div');
+        nameDiv.className = 'download-name';
+        nameDiv.textContent = download.name;
+        listItem.appendChild(nameDiv);
+        
+        // Create progress bar container
+        const progressContainer = document.createElement('div');
+        progressContainer.className = 'download-progress-container';
+        
+        // Progress bar background
+        const progressBackground = document.createElement('div');
+        progressBackground.className = 'download-progress-background';
+        
+        // Progress bar foreground
+        const progressForeground = document.createElement('div');
+        progressForeground.className = 'download-progress-foreground';
+        progressForeground.style.width = `${download.progress || 0}%`;
+        
+        // Progress text
+        const progressText = document.createElement('div');
+        progressText.className = 'download-progress-text';
+        progressText.textContent = `${Math.round(download.progress || 0)}%`;
+        
+        progressBackground.appendChild(progressForeground);
+        progressContainer.appendChild(progressBackground);
+        progressContainer.appendChild(progressText);
+        listItem.appendChild(progressContainer);
+        
         downloadsList.appendChild(listItem);
       });
       
