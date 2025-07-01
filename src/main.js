@@ -12,8 +12,6 @@ let mainWindow;
 let isCancelled = false;
 let isSkipping = false;
 
-// --- Built-in Logging System, yt-dlp Helpers, Menu, createWindow, and all other setup functions ---
-// This code is identical to the version you provided and is known to be stable.
 function appLog(message) {
   if (mainWindow) {
     mainWindow.webContents.send("log-update", message);
@@ -271,12 +269,10 @@ async function runDownloader(options, log) {
       current: 0,
       total: totalJobs,
     });
+
+  // --- Build a flat download job queue ---
+  let downloadJobs = [];
   for (let i = 0; i < totalJobs; i++) {
-    if (isCancelled) {
-      log("[INFO] Download process stopped by user.");
-      break;
-    }
-    isSkipping = false;
     const subreddit = subredditsToDownload[i];
     const { url: subredditUrl, type, domain } = subreddit;
     let folderName;
@@ -304,54 +300,99 @@ async function runDownloader(options, log) {
         unhandledLogPath
       );
       log(`[INFO] [${folderName}] Found ${links.length} potential files.`);
-      let downloadCount = 0;
-      if (links.length > 0) {
-        for (let j = 0; j < links.length; j++) {
-          if (isCancelled || isSkipping) break;
-          const link = links[j];
-          if (mainWindow)
-            mainWindow.webContents.send("download-progress", {
-              current: j + 1,
-              total: links.length,
-            });
-          let success = false;
-          if (link.downloader === "ytdlp") {
-            success = await downloadWithYtDlp(
-              link.url,
-              subredditDir,
-              log,
-              link.id,
-              link.title
-            );
-          } else {
-            success = await downloadFile(
-              link.url,
-              subredditDir,
-              log,
-              link.id,
-              link.title
-            );
-          }
-          if (success) downloadCount++;
-        }
+      for (let j = 0; j < links.length; j++) {
+        const link = links[j];
+        downloadJobs.push({
+          link,
+          subredditDir,
+          folderName,
+          subredditUrl,
+        });
       }
-      if (isSkipping) log(`[INFO] [${folderName}] Skipped by user.`);
-      else if (!isCancelled)
-        log(`[SUCCESS] [${folderName}] Downloaded ${downloadCount} new files.`);
     } catch (error) {
       log(`[ERROR] [${folderName}] An error occurred: ${error.stack}`);
-    } finally {
       if (mainWindow) {
         mainWindow.webContents.send("subreddit-complete", subredditUrl);
-        mainWindow.webContents.send("queue-progress", {
-          current: i + 1,
-          total: totalJobs,
-        });
       }
     }
   }
-  if (isCancelled) log("[INFO] Download process stopped by user.");
-  log("--- ALL JOBS COMPLETE ---");
+
+  // --- Parallel download logic ---
+  let activeDomains = new Set();
+  let activeCount = 0;
+  let completedCount = 0;
+  let totalLinks = downloadJobs.length;
+
+  // Add a started flag to each job
+  downloadJobs.forEach((job) => (job.started = false));
+
+  async function tryStartDownloads() {
+    while (activeCount < MAX_SIMULTANEOUS_DOWNLOADS) {
+      // Find the next eligible job: not started, domain not active
+      const nextJob = downloadJobs.find(job => {
+        if (job.started) return false;
+        const match = job.link.url.match(/https?:\/\/(?:www\.)?([^\/]+)/i);
+        const domain = match ? match[1] : "other";
+        return !activeDomains.has(domain);
+      });
+      if (!nextJob) break;
+      const match = nextJob.link.url.match(/https?:\/\/(?:www\.)?([^\/]+)/i);
+      const domain = match ? match[1] : "other";
+      nextJob.started = true;
+      activeDomains.add(domain);
+      activeCount++;
+      // Start the download
+      (async () => {
+        let success = false;
+        if (nextJob.link.downloader === "ytdlp") {
+          success = await downloadWithYtDlp(
+            nextJob.link.url,
+            nextJob.subredditDir,
+            log,
+            nextJob.link.id,
+            nextJob.link.title,
+            nextJob.link.seriesFolder
+          );
+        } else {
+          success = await downloadFile(
+            nextJob.link.url,
+            nextJob.subredditDir,
+            log,
+            nextJob.link.id,
+            nextJob.link.title
+          );
+        }
+        completedCount++;
+        activeDomains.delete(domain);
+        activeCount--;
+        if (mainWindow) {
+          mainWindow.webContents.send("download-progress", {
+            current: completedCount,
+            total: totalLinks,
+          });
+        }
+        // Mark subreddit as complete if all its jobs are done
+        if (completedCount === totalLinks) {
+          log("--- ALL JOBS COMPLETE ---");
+          if (mainWindow) {
+            mainWindow.webContents.send("queue-progress", {
+              current: totalJobs,
+              total: totalJobs,
+            });
+          }
+        }
+        // Try to start more downloads if possible
+        await tryStartDownloads();
+      })();
+    }
+  }
+
+  // Start up to MAX_SIMULTANEOUS_DOWNLOADS downloads
+  await tryStartDownloads();
+  // Wait for all downloads to finish
+  while (completedCount < totalLinks && !isCancelled && !isSkipping) {
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
 }
 
 // Patch fetchAllMediaLinks to handle yt-dlp links directly
@@ -361,6 +402,144 @@ async function fetchAllMediaLinks(
   log,
   unhandledLogPath
 ) {
+  // --- heavy-r.com custom logic ---
+  try {
+    const heavyRVideoMatch = subredditUrl.match(
+      /^https?:\/\/(?:www\.)?heavy-r\.com\/video\/[^\/]+\/?/i
+    );
+    const heavyRProfileMatch = subredditUrl.match(
+      /^https?:\/\/(?:www\.)?heavy-r\.com\/user\/([^\/?#]+)/i
+    );
+    if (heavyRVideoMatch) {
+      log(`[INFO] Detected heavy-r.com video page.`);
+      const videoInfo = await scrapeHeavyRVideoPage(subredditUrl, log);
+      if (videoInfo && videoInfo.url) {
+        return [
+          {
+            url: videoInfo.url,
+            type: "video",
+            downloader: "ytdlp",
+            id: Date.now().toString(),
+            title: videoInfo.title,
+          },
+        ];
+      } else {
+        log(`[ERROR] Could not extract video from heavy-r.com page.`);
+        return [];
+      }
+    }
+    if (heavyRProfileMatch) {
+      const username = heavyRProfileMatch[1];
+      log(`[INFO] Detected heavy-r.com profile: ${username}`);
+      // Gather both videos and favorites
+      const allLinks = [];
+      for (const section of ["videos", "favorites"]) {
+        let page = 0;
+        let keepGoing = true;
+        while (keepGoing) {
+          const pageUrl = `https://www.heavy-r.com/user/${username}?pro=${section}&p=${page}`;
+          log(
+            `[INFO] [heavy-r] Scanning ${section} page ${page} for user ${username}...`
+          );
+          const links = await scrapeHeavyRProfileSection(pageUrl, log);
+          if (links.length === 0) {
+            keepGoing = false;
+          } else {
+            allLinks.push(...links);
+            page++;
+          }
+        }
+      }
+      log(
+        `[INFO] [heavy-r] Found ${allLinks.length} videos/favorites for profile ${username}.`
+      );
+      return allLinks;
+    }
+  } catch (e) {
+    log(`[ERROR] heavy-r.com handler failed: ${e.message}`);
+  }
+  // --- qosvideos.com custom logic ---
+  try {
+    const qosvideosMatch = subredditUrl.match(
+      /^https?:\/\/(?:www\.)?qosvideos\.com\/\S+/i
+    );
+    if (qosvideosMatch) {
+      log(`[INFO] Detected qosvideos.com video page.`);
+      const videoInfo = await scrapeQosvideosPage(subredditUrl, log);
+      if (videoInfo && videoInfo.url) {
+        return [
+          {
+            url: videoInfo.url,
+            type: "video",
+            downloader: "ytdlp",
+            id: Date.now().toString(),
+            title: videoInfo.title,
+          },
+        ];
+      } else {
+        log(`[ERROR] Could not extract video from qosvideos.com page.`);
+        return [];
+      }
+    }
+  } catch (e) {
+    log(`[ERROR] qosvideos.com handler failed: ${e.message}`);
+  }
+  // --- pmvhaven.com custom logic ---
+  try {
+    const pmvhavenProfileMatch = subredditUrl.match(
+      /^https?:\/\/(?:www\.)?pmvhaven\.com\/profile\/([^\/?#]+)/i
+    );
+    const pmvhavenVideoMatch = subredditUrl.match(
+      /^https?:\/\/(?:www\.)?pmvhaven\.com\/video\//i
+    );
+    if (pmvhavenProfileMatch) {
+      const username = pmvhavenProfileMatch[1];
+      log(`[INFO] Detected pmvhaven.com profile: ${username}`);
+      const links = await fetchPmvhavenProfileVideos(username, appLog);
+      log(
+        `[INFO] [pmvhaven] Found ${links.length} videos/favorites for profile ${username}.`
+      );
+      return links;
+    }
+    if (pmvhavenVideoMatch) {
+      // Direct video, handled by yt-dlp
+      return [
+        {
+          url: subredditUrl,
+          type: "video",
+          downloader: "ytdlp",
+          id: Date.now().toString(),
+          title: subredditUrl,
+        },
+      ];
+    }
+  } catch (e) {
+    log(`[ERROR] pmvhaven.com handler failed: ${e.message}`);
+  }
+
+  // --- crazyshit.com series page handler ---
+  try {
+    // Detect crazyshit.com series page: e.g. https://crazyshit.com/series/shitty-days_10/
+    const crazyshitSeriesMatch = subredditUrl.match(
+      /^https?:\/\/(?:www\.)?crazyshit\.com\/series\/([^\/?#]+)\/?/i
+    );
+    if (crazyshitSeriesMatch) {
+      const seriesName = crazyshitSeriesMatch[1];
+      log(`[INFO] Detected crazyshit.com series: ${seriesName}`);
+      const links = await scrapeCrazyshitSeriesPage(subredditUrl, log);
+      // Add seriesFolder property for subfolder organization
+      links.forEach((link) => {
+        link.seriesFolder = seriesName;
+      });
+      log(
+        `[INFO] [crazyshit.com] Found ${links.length} videos in series '${seriesName}'.`
+      );
+      return links;
+    }
+  } catch (e) {
+    log(`[ERROR] crazyshit.com handler failed: ${e.message}`);
+  }
+
   if (options.type === "ytdlp" && options.domain) {
     // Direct yt-dlp link, just return it for yt-dlp
     return [
@@ -373,6 +552,7 @@ async function fetchAllMediaLinks(
       },
     ];
   }
+
   let allLinks = [];
   let after = null;
   let postCount = 0;
@@ -492,7 +672,144 @@ async function fetchAllMediaLinks(
   if (options.maxLinks > 0) return filteredLinks.slice(0, options.maxLinks);
   return filteredLinks;
 }
-// highlight-end
+
+// --- pmvhaven.com profile/favorites POST helper ---
+async function fetchPmvhavenProfileVideos(username, log) {
+  const apiUrl = "https://pmvhaven.com/api/v2/profileInput";
+  const headers = {
+    "User-Agent":
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0",
+    Accept: "*/*",
+    "Accept-Language": "en-US,en;q=0.5",
+    "Content-Type": "text/plain;charset=UTF-8",
+    "Sec-Fetch-Dest": "empty",
+    "Sec-Fetch-Mode": "cors",
+    "Sec-Fetch-Site": "same-origin",
+    Priority: "u=4",
+    Pragma: "no-cache",
+    "Cache-Control": "no-cache",
+    Referer: `https://pmvhaven.com/profile/${username}`,
+  };
+
+  // Each entry: { mode, getMoreMode, extraFields }
+  const sections = [
+    {
+      mode: "getProfileVideos",
+      getMoreMode: "GetMoreProfileVideos",
+      extraFields: {},
+    },
+    {
+      mode: "getProfileFavorites",
+      getMoreMode: "GetMoreFavoritedVideos",
+      extraFields: { search: null, date: "Date", sort: "Sort" },
+    },
+  ];
+
+  let allVideos = [];
+
+  for (const section of sections) {
+    let page = 1;
+    let totalCount = null;
+    let collected = 0;
+    let perPage = 0;
+    let done = false;
+
+    // First request (mode: getProfileVideos or getProfileFavorites)
+    try {
+      const body = JSON.stringify({
+        user: username,
+        mode: section.mode,
+        ...section.extraFields,
+      });
+      const response = await axios.post(apiUrl, body, { headers });
+      if (
+        response.status === 200 &&
+        response.data &&
+        Array.isArray(response.data.videos)
+      ) {
+        const videos = response.data.videos;
+        totalCount = response.data.count || videos.length;
+        perPage = videos.length;
+        collected += videos.length;
+        appLog(
+          `[INFO] ${
+            section.mode === "getProfileVideos" ? "Profile Videos" : "Favorites"
+          } - Parsing page 1 : found ${videos.length} videos.`
+        );
+        for (const video of videos) {
+          if (video.url) {
+            allVideos.push({
+              url: video.url,
+              type: "video",
+              downloader: "ytdlp",
+              id: video._id || `${username}_${section.mode}_${video.title}`,
+              title: video.title || `${username}_${section.mode}`,
+            });
+          }
+        }
+        // If all videos are already collected, skip pagination
+        if (collected >= totalCount) continue;
+      } else {
+        continue;
+      }
+    } catch (err) {
+      log(
+        `[ERROR] pmvhaven.com ${section.mode} fetch failed for ${username}: ${err.message}`
+      );
+      continue;
+    }
+
+    // Paginate for remaining videos
+    page = 2;
+    while (collected < totalCount) {
+      try {
+        let bodyObj = {
+          user: username,
+          index: page,
+          mode: section.getMoreMode,
+          ...section.extraFields,
+        };
+        const body = JSON.stringify(bodyObj);
+        const response = await axios.post(apiUrl, body, { headers });
+        let videos = [];
+        if (response.status === 200 && response.data) {
+          if (Array.isArray(response.data.videos)) {
+            videos = response.data.videos;
+          } else if (Array.isArray(response.data.data)) {
+            videos = response.data.data;
+          }
+        }
+        appLog(
+          `[INFO] ${
+            section.mode === "getProfileVideos" ? "Profile Videos" : "Favorites"
+          } - Parsing page ${page} : found ${videos.length} videos.`
+        );
+        if (videos.length === 0) break;
+        collected += videos.length;
+        for (const video of videos) {
+          if (video.url) {
+            allVideos.push({
+              url: video.url,
+              type: "video",
+              downloader: "ytdlp",
+              id:
+                video._id ||
+                `${username}_${section.getMoreMode}_${video.title}`,
+              title: video.title || `${username}_${section.getMoreMode}`,
+            });
+          }
+        }
+        page++;
+      } catch (err) {
+        log(
+          `[ERROR] pmvhaven.com ${section.getMoreMode} page ${page} fetch failed for ${username}: ${err.message}`
+        );
+        break;
+      }
+    }
+  }
+  return allVideos;
+}
 
 async function getRedgifsToken(log) {
   if (redgifsToken) return redgifsToken;
@@ -512,6 +829,329 @@ async function getRedgifsToken(log) {
     log(`[Auth] Redgifs token error: ${error.message}`);
     return null;
   }
+}
+
+async function getHeavyRCookiesAndHtml(targetUrl) {
+  return new Promise((resolve, reject) => {
+    let win = new BrowserWindow({
+      show: false, // Headless: do not show the window
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+      },
+    });
+    let finished = false;
+    win.webContents.setUserAgent(
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+    );
+    win.webContents.session.setCertificateVerifyProc((request, callback) => {
+      callback(0);
+    });
+    win.loadURL(targetUrl);
+    win.webContents.on("did-finish-load", async () => {
+      // Poll for the presence of the video element or its source, up to 2s
+      const pollForVideo = async () => {
+        const maxAttempts = 20; // 2s at 100ms intervals
+        let attempt = 0;
+        while (attempt < maxAttempts) {
+          try {
+            const hasVideo = await win.webContents.executeJavaScript(`
+              (function() {
+                var v = document.getElementById('video-file');
+                if (v && (v.src || (v.querySelector('source') && v.querySelector('source').src))) {
+                  return true;
+                }
+                return false;
+              })();
+            `);
+            if (hasVideo) return true;
+          } catch {}
+          await new Promise((r) => setTimeout(r, 100));
+          attempt++;
+        }
+        return false;
+      };
+      if (finished) return;
+      try {
+        await pollForVideo();
+        const cookies = await win.webContents.session.cookies.get({
+          url: targetUrl,
+        });
+        const cookieHeader = cookies
+          .map((c) => `${c.name}=${c.value}`)
+          .join("; ");
+        const html = await win.webContents.executeJavaScript(
+          "document.documentElement.outerHTML"
+        );
+        finished = true;
+        win.destroy();
+        resolve({ cookieHeader, html });
+      } catch (e) {
+        if (!finished) {
+          finished = true;
+          win.destroy();
+          reject(e);
+        }
+      }
+    });
+    win.on("unresponsive", () => {
+      if (!finished) {
+        finished = true;
+        win.destroy();
+        reject(new Error("BrowserWindow became unresponsive"));
+      }
+    });
+    win.on("closed", () => {
+      if (!finished) {
+        finished = true;
+        reject(
+          new Error(
+            "BrowserWindow closed before cookies/html could be retrieved"
+          )
+        );
+      }
+    });
+    win.on("crashed", () => {
+      if (!finished) {
+        finished = true;
+        reject(
+          new Error(
+            "BrowserWindow crashed before cookies/html could be retrieved"
+          )
+        );
+      }
+    });
+  });
+}
+
+async function scrapeHeavyRVideoPage(pageUrl, log) {
+  try {
+    console.log("running getheavyrcookiesandhtml");
+    const { cookieHeader, html } = await getHeavyRCookiesAndHtml(pageUrl);
+    // Output the HTML to the terminal for debugging
+    console.log("finished");
+    // Use cheerio for robust extraction
+    const cheerio = require("cheerio");
+    const $ = cheerio.load(html);
+
+    // Find the <video id="video-file"> and its <source type="video/mp4"> or src attribute
+    let url = null;
+    let title = null;
+    let videoSource = null;
+    const video = $("#video-file");
+    if (video.length) {
+      // First, check for src attribute directly on <video>
+      videoSource = video.attr("src");
+      if (!videoSource) {
+        // Try to get the first <source> child, regardless of type attribute
+        videoSource = video.find("source").attr("src");
+      }
+    }
+    if (!videoSource) {
+      // Fallback: any <source ...mp4>
+      videoSource = $('source[type="video/mp4"]').attr("src");
+      if (!videoSource) {
+        // Fallback: any <source> under any <video>
+        videoSource = $("video source").attr("src");
+      }
+    }
+    if (!videoSource) {
+      // Fallback: try to find video URL in script tags or anywhere in the HTML
+      const mp4Regex = /https?:\/\/[^"'\s>]+\.mp4/gi;
+      let matches = html.match(mp4Regex);
+      if (matches && matches.length > 0) {
+        videoSource = matches[0];
+        log(`[heavy-r] Fallback: Found mp4 URL in HTML: ${videoSource}`);
+      } else {
+        // Try to find in script tags
+        $("script").each((i, el) => {
+          const scriptContent = $(el).html();
+          if (scriptContent) {
+            const scriptMatches = scriptContent.match(
+              /https?:\/\/[^"'\s>]+\.mp4/gi
+            );
+            if (scriptMatches && scriptMatches.length > 0) {
+              videoSource = scriptMatches[0];
+              log(
+                `[heavy-r] Fallback: Found mp4 URL in <script>: ${videoSource}`
+              );
+              return false; // break
+            }
+          }
+        });
+      }
+    }
+    if (videoSource) {
+      url = videoSource;
+    }
+    console.log("DEBUG: videoSource found:", videoSource);
+    // Title: <h1 class="video-title"> or <title>
+    title = ($("h1.video-title").text() || $("title").text() || "").trim();
+    console.log("DEBUG: title found:", title);
+    if (url) {
+      return {
+        url,
+        title: title || "heavy-r_video",
+      };
+    }
+    log("[heavy-r] No video source found in HTML.");
+  } catch (err) {
+    log(`[ERROR] Failed to scrape heavy-r.com page: ${err.message}`);
+  }
+  return null;
+}
+
+async function scrapeHeavyRProfileSection(pageUrl, log) {
+  try {
+    // Use the same polling logic as getHeavyRCookiesAndHtml for video element
+    const { cookieHeader, html } = await new Promise((resolve, reject) => {
+      let win = new BrowserWindow({
+        show: false,
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true,
+        },
+      });
+      let finished = false;
+      win.webContents.setUserAgent(
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+      );
+      win.webContents.session.setCertificateVerifyProc((request, callback) => {
+        callback(0);
+      });
+      win.loadURL(pageUrl);
+      win.webContents.on("did-finish-load", async () => {
+        // Poll for the presence of any video link in the DOM, up to 2s
+        const pollForLinks = async () => {
+          const maxAttempts = 20;
+          let attempt = 0;
+          while (attempt < maxAttempts) {
+            try {
+              const hasLinks = await win.webContents.executeJavaScript(`
+                (function() {
+                  // Look for at least one <a class=\"image\"> link
+                  return !!document.querySelector('a.image');
+                })();
+              `);
+              if (hasLinks) return true;
+            } catch {}
+            await new Promise((r) => setTimeout(r, 100));
+            attempt++;
+          }
+          return false;
+        };
+        if (finished) return;
+        try {
+          await pollForLinks();
+          const cookies = await win.webContents.session.cookies.get({
+            url: pageUrl,
+          });
+          const cookieHeader = cookies
+            .map((c) => `${c.name}=${c.value}`)
+            .join("; ");
+          const html = await win.webContents.executeJavaScript(
+            "document.documentElement.outerHTML"
+          );
+          finished = true;
+          win.destroy();
+          resolve({ cookieHeader, html });
+        } catch (e) {
+          if (!finished) {
+            finished = true;
+            win.destroy();
+            reject(e);
+          }
+        }
+      });
+      win.on("unresponsive", () => {
+        if (!finished) {
+          finished = true;
+          win.destroy();
+          reject(new Error("BrowserWindow became unresponsive"));
+        }
+      });
+      win.on("closed", () => {
+        if (!finished) {
+          finished = true;
+          reject(
+            new Error(
+              "BrowserWindow closed before cookies/html could be retrieved"
+            )
+          );
+        }
+      });
+      win.on("crashed", () => {
+        if (!finished) {
+          finished = true;
+          reject(
+            new Error(
+              "BrowserWindow crashed before cookies/html could be retrieved"
+            )
+          );
+        }
+      });
+    });
+    // Output the HTML to the terminal for debugging
+    // console.log("=== heavy-r.com HTML response START ===");
+    // console.log(html);
+    // console.log("=== heavy-r.com HTML response END ===");
+    // Find all video links in the section
+    const videoLinks = [];
+    // Each video: <a href="/video/441968/2_Cocks_In_One_Pussy/" class="image">
+    const regex = /<a\s+href="(\/video\/[^\"]+)"\s+class="image">/g;
+    let match;
+    while ((match = regex.exec(html)) !== null) {
+      const href = match[1];
+      // Extract title if possible
+      let title = null;
+      // Try to find the title in the following <h4 class="title"><a ...>TITLE</a></h4>
+      // We'll search for the nearest <h4 class="title"> after this match
+      const afterMatch = html.slice(match.index);
+      const titleMatch = afterMatch.match(
+        /<h4[^>]*class="title"[^>]*>\s*<a[^>]*>([^<]+)<\/a>/i
+      );
+      if (titleMatch && titleMatch[1]) {
+        title = titleMatch[1].trim();
+      }
+      videoLinks.push({
+        url: `https://www.heavy-r.com${href}`,
+        type: "video",
+        downloader: "ytdlp",
+        id: `${href}_${Date.now()}`,
+        title: title || "heavy-r_video",
+      });
+    }
+    return videoLinks;
+  } catch (err) {
+    log(`[ERROR] Failed to scrape heavy-r.com profile section: ${err.message}`);
+    return [];
+  }
+}
+
+async function scrapeQosvideosPage(pageUrl, log) {
+  try {
+    const response = await axios.get(pageUrl, {
+      headers: { "User-Agent": BROWSER_USER_AGENT },
+    });
+    const html = response.data;
+    // Extract contentURL
+    const contentUrlMatch = html.match(
+      /<meta\s+itemprop="contentURL"\s+content="([^"]+)"/i
+    );
+    // Extract name
+    const nameMatch = html.match(
+      /<meta\s+itemprop="name"\s+content="([^"]+)"/i
+    );
+    if (contentUrlMatch && contentUrlMatch[1]) {
+      return {
+        url: contentUrlMatch[1],
+        title: nameMatch && nameMatch[1] ? nameMatch[1] : "qosvideos_video",
+      };
+    }
+  } catch (err) {
+    log(`[ERROR] Failed to scrape qosvideos.com page: ${err.message}`);
+  }
+  return null;
 }
 
 async function scrapeImgurAlbum(albumUrl, log) {
@@ -567,6 +1207,40 @@ async function scrapeXhamsterPage(pageUrl) {
   return null;
 }
 
+// --- crazyshit.com custom logic ---
+async function scrapeCrazyshitSeriesPage(seriesUrl, log) {
+  try {
+    const axiosResponse = await axios.get(seriesUrl, {
+      headers: { "User-Agent": BROWSER_USER_AGENT },
+    });
+    const html = axiosResponse.data;
+    const cheerio = require("cheerio");
+    const $ = cheerio.load(html);
+    const videoLinks = [];
+    // Find all <a class="thumb"> inside <div class="tile">
+    $("div.tile a.thumb").each((i, el) => {
+      const href = $(el).attr("href");
+      const title =
+        $(el).attr("title") ||
+        $(el).find("img[alt]").attr("alt") ||
+        "crazyshit_video";
+      if (href && href.includes("/cnt/medias/")) {
+        videoLinks.push({
+          url: href,
+          type: "video",
+          downloader: "ytdlp",
+          id: `${Date.now()}_${i}`,
+          title: title.trim(),
+        });
+      }
+    });
+    return videoLinks;
+  } catch (err) {
+    log(`[ERROR] Failed to scrape crazyshit.com series page: ${err.message}`);
+    return [];
+  }
+}
+
 const YT_DLP_HOSTS = [
   "youtube.com",
   "youtu.be",
@@ -590,6 +1264,8 @@ const YT_DLP_HOSTS = [
   "boy18tube.com",
   "cuteboytube.com",
   "pornpawg.com",
+  "qosvideos.com",
+  "heavy-r.com",
 ];
 
 async function extractMediaUrlsFromPost(
@@ -635,7 +1311,7 @@ async function extractMediaUrlsFromPost(
       Object.values(media_metadata).forEach((item, i) => {
         if (item?.s?.u)
           urls.push({
-            url: item.s.u.replace(/&amp;/g, "&"),
+            url: item.s.u.replace(/&/g, "&"),
             type: "image",
             downloader: "axios",
             id: `${postId}_${i}`,
@@ -704,25 +1380,9 @@ async function extractMediaUrlsFromPost(
         });
       }
     } else {
-      const extension = path.extname(new URL(postUrl).pathname).toLowerCase();
-      const imageExtensions = [".jpg", ".jpeg", ".png", ".webp", ".bmp"];
-      const gifExtensions = [".gif"];
-      if (imageExtensions.includes(extension)) {
-        urls.push({
-          url: postUrl,
-          type: "image",
-          downloader: "axios",
-          id: postId,
-          title: postTitle,
-        });
-      } else if (gifExtensions.includes(extension)) {
-        urls.push({
-          url: postUrl.replace(".gifv", ".mp4"),
-          type: "video",
-          downloader: "axios",
-          id: postId,
-          title: postTitle,
-        });
+      // --- crazyshit.com series page: skip direct yt-dlp, let fetchAllMediaLinks handle ---
+      if (domain.includes("crazyshit.com") && /\/series\//i.test(postUrl)) {
+        // Do not push, let fetchAllMediaLinks handle series
       } else if (YT_DLP_HOSTS.some((host) => domain.includes(host))) {
         urls.push({
           url: postUrl,
@@ -741,13 +1401,31 @@ async function extractMediaUrlsFromPost(
   return urls;
 }
 
-async function downloadWithYtDlp(url, outputDir, log, postId, postTitle) {
+async function downloadWithYtDlp(
+  url,
+  outputDir,
+  log,
+  postId,
+  postTitle,
+  seriesFolder
+) {
   return new Promise((resolve) => {
     const sanitizedTitle = sanitizeTitleForFilename(postTitle);
     const fileNameTemplate = `${sanitizedTitle}_${postId}.%(ext)s`;
-    const outputPath = path.join(outputDir, fileNameTemplate);
+    let outputPath;
+    if (seriesFolder) {
+      outputPath = path.join(outputDir, seriesFolder, fileNameTemplate);
+    } else {
+      outputPath = path.join(outputDir, fileNameTemplate);
+    }
     try {
-      const filesInDir = fs.readdirSync(outputDir);
+      const dirToCheck = seriesFolder
+        ? path.join(outputDir, seriesFolder)
+        : outputDir;
+      if (!fs.existsSync(dirToCheck)) {
+        fs.mkdirSync(dirToCheck, { recursive: true });
+      }
+      const filesInDir = fs.readdirSync(dirToCheck);
       const baseName = `${sanitizedTitle}_${postId}`;
       const fileExists = filesInDir.some(
         (file) => path.parse(file).name === baseName
@@ -867,3 +1545,6 @@ function extractName(url) {
     return null;
   }
 }
+
+// --- Configurable max simultaneous downloads ---
+const MAX_SIMULTANEOUS_DOWNLOADS = 10; // Change this value to adjust the cap
