@@ -31,6 +31,13 @@ h3 {
   letter-spacing: 1px;
   margin: 24px 0 8px 0;
 }
+.download-section-title {
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  font-size: 0.8rem;
+  letter-spacing: 1px;
+  margin: 0 0 8px 0;
+}
 
 /* ===== Layout ===== */
 .app-container {
@@ -76,9 +83,9 @@ h3 {
 }
 .app-tagline {
   color: var(--color-text-secondary);
-  font-size: 0.9rem;
+  font-size: 0.7rem;
   font-weight: 500;
-  margin: -16px 0 0px 4px;
+  margin: -25px 0 0px 4px;
 }
 
 .add-panel textarea {
