@@ -249,7 +249,7 @@ ipcMain.on("stop-download", () => {
   // Kill all active yt-dlp processes
   activeProcesses.forEach((childProcess) => {
     if (childProcess && !childProcess.killed && childProcess.pid) {
-      appLog(`[INFO] Terminating process with PID: ${childProcess.pid}`);
+      appLog(`[INFO] Cancelling Downloads`);
       if (process.platform === "win32") {
         // Use taskkill on Windows to forcefully terminate the process and its children
         const { spawn } = require("child_process");
@@ -379,7 +379,7 @@ async function runDownloader(options, log) {
     log("--- ALL JOBS COMPLETE ---");
     return;
   }
-  log(`[INFO] ${totalJobs} subreddits are pending download.`);
+  log(`[INFO] ${totalJobs} items are pending download.`);
   if (mainWindow)
     mainWindow.webContents.send("queue-progress", {
       current: 0,
@@ -532,7 +532,7 @@ async function runDownloader(options, log) {
           
           // Check if this subreddit is complete
           if (trackerEntry.completedJobs === trackerEntry.totalJobs) {
-            log(`[INFO] Subreddit ${nextJob.subredditUrl} completed (${trackerEntry.completedJobs}/${trackerEntry.totalJobs} files)`);
+            log(`[INFO] Job - ${nextJob.subredditUrl} completed (${trackerEntry.completedJobs}/${trackerEntry.totalJobs} files)`);
             if (mainWindow) {
               mainWindow.webContents.send("subreddit-complete", nextJob.subredditUrl);
             }
@@ -2118,11 +2118,11 @@ async function downloadFileMultiThreaded(url, outputPath, log, queueId, title) {
     await Promise.all(chunkPaths.map(chunkPath => fsp.unlink(chunkPath).catch(() => {})));
     await fsp.rmdir(tempDir).catch(() => {});
     
-    log(`[SUCCESS] Multi-threaded download completed: ${title}`);
+    log(`[SUCCESS] Download completed: ${title}`);
     return true;
     
   } catch (error) {
-    log(`[ERROR] Multi-threaded download failed: ${error.message}`);
+    log(`[ERROR] Download failed: ${error.message}`);
     return false;
   }
 }

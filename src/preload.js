@@ -28,4 +28,7 @@ contextBridge.exposeInMainWorld("api", {
   getActiveDownloads: () => ipcRenderer.invoke("get-active-downloads"),
   onDownloadQueueUpdated: (callback) =>
     ipcRenderer.on("download-queue-updated", callback),
+
+  // Clipboard access
+  readClipboard: () => navigator.clipboard.readText(),
 });

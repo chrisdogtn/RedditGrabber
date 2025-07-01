@@ -227,7 +227,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (pendingSubs.length > 0) {
       setUiForDownloading(true);
       logArea.innerHTML = "";
-      addLogMessage("[INFO] Starting download process...");
+      addLogMessage("[INFO] Initializing...");
       progressBar.classList.remove("indeterminate");
       progressBar.style.width = "0%";
       progressValue.textContent = "0%";
@@ -268,6 +268,91 @@ document.addEventListener("DOMContentLoaded", () => {
 
   restartButton.addEventListener("click", () => {
     window.api.restartApp();
+  });
+
+  // ===== Context Menu for Textarea =====
+  let contextMenu = null;
+
+  function createContextMenu() {
+    const menu = document.createElement('div');
+    menu.className = 'context-menu';
+    menu.innerHTML = `
+      <div class="context-menu-item" data-action="paste">
+        <span>Paste</span>
+        <span class="context-menu-shortcut">Ctrl+V</span>
+      </div>
+    `;
+    document.body.appendChild(menu);
+    return menu;
+  }
+
+  function showContextMenu(event) {
+    event.preventDefault();
+    
+    // Remove existing context menu
+    if (contextMenu) {
+      contextMenu.remove();
+    }
+    
+    // Create new context menu
+    contextMenu = createContextMenu();
+    
+    // Position the menu
+    const x = event.clientX;
+    const y = event.clientY;
+    
+    contextMenu.style.left = `${x}px`;
+    contextMenu.style.top = `${y}px`;
+    contextMenu.classList.add('show');
+    
+    // Add click handlers
+    const pasteItem = contextMenu.querySelector('[data-action="paste"]');
+    pasteItem.addEventListener('click', async () => {
+      try {
+        const clipboardText = await window.api.readClipboard();
+        if (clipboardText) {
+          const currentValue = subredditTextArea.value;
+          const cursorPosition = subredditTextArea.selectionStart;
+          const beforeCursor = currentValue.substring(0, cursorPosition);
+          const afterCursor = currentValue.substring(subredditTextArea.selectionEnd);
+          
+          // Insert clipboard content at cursor position
+          subredditTextArea.value = beforeCursor + clipboardText + afterCursor;
+          
+          // Move cursor to end of pasted content
+          const newCursorPosition = cursorPosition + clipboardText.length;
+          subredditTextArea.setSelectionRange(newCursorPosition, newCursorPosition);
+          subredditTextArea.focus();
+        }
+      } catch (error) {
+        addLogMessage("[ERROR] Failed to read from clipboard");
+      }
+      hideContextMenu();
+    });
+  }
+
+  function hideContextMenu() {
+    if (contextMenu) {
+      contextMenu.remove();
+      contextMenu = null;
+    }
+  }
+
+  // Add context menu to textarea
+  subredditTextArea.addEventListener('contextmenu', showContextMenu);
+  
+  // Hide context menu when clicking elsewhere
+  document.addEventListener('click', (event) => {
+    if (contextMenu && !contextMenu.contains(event.target)) {
+      hideContextMenu();
+    }
+  });
+
+  // Hide context menu on escape key
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && contextMenu) {
+      hideContextMenu();
+    }
   });
 
   // ===== IPC & Log Handlers =====

@@ -10,6 +10,8 @@
   --font-family: "Inter", sans-serif;
 }
 
+
+
 body {
   font-family: var(--font-family);
   background-color: var(--color-background);
@@ -80,7 +82,20 @@ h3 {
   margin: 0 0 24px 0;
   font-size: 1.8rem;
   color: var(--color-primary);
+  font-weight: bold;
 }
+
+.loading-text {
+	background: linear-gradient(90deg, #00f, #0ff, #00f) -100%/ 200%;
+	-webkit-background-clip: text;
+	        background-clip: text;
+	color: transparent;
+	animation: shimmer 2s linear infinite;
+  	font: 900 2em exo, sans-serif;
+}
+
+@keyframes shimmer { to { background-position: 100% } }
+
 .app-tagline {
   color: var(--color-text-secondary);
   font-size: 0.7rem;
@@ -357,10 +372,10 @@ button.danger:hover {
   width: 0%;
   border-radius: 8px;
   transition: width 0.2s ease-out;
-  background: linear-gradient(90deg, #00f5d4, #00b3a7, #00f5d4);
+  background: linear-gradient(90deg, #f5b400, #b39800, #f5b400);
   background-size: 200% 200%;
   animation: gradient-animation 2s ease infinite;
-  box-shadow: 0 0 8px rgba(0, 245, 212, 0.5), 0 0 16px rgba(0, 245, 212, 0.3);
+  box-shadow: 0 0 8px rgba(245, 180, 0, 0.5), 0 0 16px rgba(245, 180, 0, 0.3);
 }
 #progress-bar-foreground.indeterminate {
   width: 100% !important;
@@ -562,4 +577,47 @@ button.danger:hover {
   color: var(--color-text-secondary);
   line-height: 12px;
   margin-right: 4px;
+}
+
+/* ===== Context Menu Styles ===== */
+.context-menu {
+  position: fixed;
+  background: var(--color-panel-background);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 4px 0;
+  min-width: 160px;
+  z-index: 1000;
+  opacity: 0;
+  transform: scale(0.95);
+  transition: opacity 0.15s ease, transform 0.15s ease;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.context-menu.show {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.context-menu-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 16px;
+  color: var(--color-text-primary);
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background-color 0.1s ease;
+}
+
+.context-menu-item:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+}
+
+.context-menu-shortcut {
+  color: var(--color-text-secondary);
+  font-size: 0.8rem;
+  margin-left: 16px;
 }
