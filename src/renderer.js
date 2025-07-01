@@ -273,7 +273,9 @@ document.addEventListener("DOMContentLoaded", () => {
   function addLogMessage(message) {
     if (
       message.includes("--- ALL JOBS COMPLETE ---") ||
-      message.includes("[FATAL]")
+      message.includes("[FATAL]") ||
+      message.includes("--- DOWNLOADS CANCELLED BY USER ---") ||
+      message.includes("Stop signal sent to all active downloads")
     ) {
       setUiForDownloading(false);
     }
