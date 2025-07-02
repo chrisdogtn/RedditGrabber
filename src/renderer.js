@@ -434,10 +434,19 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  window.api.onUpdateNotification((event, { message, showRestart }) => {
+  window.api.onUpdateNotification((event, { message, showRestart, showProgress }) => {
     notificationMessage.textContent = message;
     notification.classList.remove("hidden");
     restartButton.classList.toggle("hidden", !showRestart);
+    
+    // Show progress bar if update is downloading
+    if (showProgress) {
+      updateProgressBarContainer.classList.remove("hidden");
+      updateProgressBarForeground.style.width = "0%";
+      updateProgressLabel.textContent = "Downloading update...";
+      updateProgressValue.textContent = "0%";
+    }
+    
     // Hide progress bar if update is ready
     if (showRestart) {
       updateProgressBarContainer.classList.add("hidden");

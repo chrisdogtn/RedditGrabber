@@ -19,8 +19,55 @@ let activeAxiosControllers = new Set();
 // Track active downloads for queue display
 let activeDownloads = [];
 
+const YTDLP_EXTRACT_HOSTS = [
+  "thisvid.com",
+  "xhamster.com",
+  "pornhub.com",
+  "xvideos.com",
+  "hypnotube.com",
+  "webmshare.com",
+  "ratedgross.com",
+  "pervertium.com",
+  "efukt.com",
+  "sissyhypno.com",
+  "boy18tube.com",
+  "cuteboytube.com",
+  "pornpawg.com",
+  "heavy-r.com",
+  "crazyshit.com",
+];
+const YT_DLP_HOSTS = [
+  "youtube.com",
+  "youtu.be",
+  "x.com",
+  "facebook.com",
+  "twitch.tv",
+  "instagram.com",
+  "xhamster.com",
+  "pornhub.com",
+  "hypnotube.com",
+  "xvideos.com",
+  "twitter.com",
+  "thisvid.com",
+  "webmshare.com",
+  "pmvhaven.com",
+  "ratedgross.com",
+  "pervertium.com",
+  "crazyshit.com",
+  "efukt.com",
+  "sissyhypno.com",
+  "boy18tube.com",
+  "cuteboytube.com",
+  "pornpawg.com",
+  "qosvideos.com",
+  "heavy-r.com",
+];
+
+// --- Hosts to bypass multi-thread downloader and use yt-dlp directly ---
+const BYPASS_YTDLP_HOSTS = ["pornpawg.com", "boy18tube.com"];
+
 function appLog(message) {
-  if (mainWindow) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("log-update", message);
   }
   console.log(message);
@@ -169,6 +216,7 @@ autoUpdater.on("update-available", (info) => {
   appLog(`[Updater] Update available (v${info.version}).`);
   mainWindow.webContents.send("update-notification", {
     message: "App update available. Downloading...",
+    showProgress: true,
   });
 });
 autoUpdater.on("download-progress", (progressObj) => {
@@ -299,12 +347,18 @@ ipcMain.handle("getYtDlpWhitelist", () => YT_DLP_HOSTS);
 
 // Download queue management functions
 function addToDownloadQueue(url, title, id) {
+  // Prevent duplicate entries in the download queue
+  const existingDownload = activeDownloads.find((item) => item.id === id);
+  if (existingDownload) {
+    return id; // Item is already in the queue
+  }
+
   const downloadItem = {
     id: id || `${Date.now()}_${Math.random()}`,
     name: sanitizeTitleForFilename(title) || url,
-    status: 'downloading',
+    status: "downloading",
     startTime: Date.now(),
-    progress: 0
+    progress: 0,
   };
   activeDownloads.push(downloadItem);
   notifyDownloadQueueUpdated();
@@ -312,7 +366,7 @@ function addToDownloadQueue(url, title, id) {
 }
 
 function updateDownloadProgress(id, progress) {
-  const download = activeDownloads.find(item => item.id === id);
+  const download = activeDownloads.find((item) => item.id === id);
   if (download) {
     download.progress = progress;
     notifyDownloadQueueUpdated();
@@ -320,7 +374,7 @@ function updateDownloadProgress(id, progress) {
 }
 
 function removeFromDownloadQueue(id) {
-  const index = activeDownloads.findIndex(item => item.id === id);
+  const index = activeDownloads.findIndex((item) => item.id === id);
   if (index !== -1) {
     activeDownloads.splice(index, 1);
     notifyDownloadQueueUpdated();
@@ -328,7 +382,7 @@ function removeFromDownloadQueue(id) {
 }
 
 function notifyDownloadQueueUpdated() {
-  if (mainWindow) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("download-queue-updated", activeDownloads);
   }
 }
@@ -441,14 +495,16 @@ async function runDownloader(options, log) {
 
   // Track completed subreddits
   let subredditCompletionTracker = new Map();
-  
+
   // Initialize completion tracker
   for (const subreddit of subredditsToDownload) {
-    const subredditJobs = downloadJobs.filter(job => job.subredditUrl === subreddit.url);
+    const subredditJobs = downloadJobs.filter(
+      (job) => job.subredditUrl === subreddit.url
+    );
     subredditCompletionTracker.set(subreddit.url, {
       totalJobs: subredditJobs.length,
       completedJobs: 0,
-      subreddit: subreddit
+      subreddit: subreddit,
     });
   }
 
@@ -498,19 +554,17 @@ async function runDownloader(options, log) {
           if (!extension) extension = ".mp4";
           const fileName = `${sanitizedTitle}_${nextJob.link.id}${extension}`;
           const outputPath = path.join(nextJob.subredditDir, fileName);
-          
+
           if (fs.existsSync(outputPath)) {
             success = false; // Skip duplicate
           } else {
-            const queueId = addToDownloadQueue(nextJob.link.url, nextJob.link.title, nextJob.link.id);
             success = await downloadFileMultiThreaded(
               nextJob.link.url,
               outputPath,
               log,
-              queueId,
+              nextJob.link.id,
               nextJob.link.title
             );
-            removeFromDownloadQueue(queueId);
           }
         } else {
           success = await downloadFile(
@@ -526,15 +580,22 @@ async function runDownloader(options, log) {
         activeCount--;
 
         // Update subreddit completion tracking
-        const trackerEntry = subredditCompletionTracker.get(nextJob.subredditUrl);
+        const trackerEntry = subredditCompletionTracker.get(
+          nextJob.subredditUrl
+        );
         if (trackerEntry) {
           trackerEntry.completedJobs++;
-          
+
           // Check if this subreddit is complete
           if (trackerEntry.completedJobs === trackerEntry.totalJobs) {
-            log(`[INFO] Job - ${nextJob.subredditUrl} completed (${trackerEntry.completedJobs}/${trackerEntry.totalJobs} files)`);
+            log(
+              `[INFO] Job - ${nextJob.subredditUrl} completed (${trackerEntry.completedJobs}/${trackerEntry.totalJobs} files)`
+            );
             if (mainWindow) {
-              mainWindow.webContents.send("subreddit-complete", nextJob.subredditUrl);
+              mainWindow.webContents.send(
+                "subreddit-complete",
+                nextJob.subredditUrl
+              );
             }
           }
         }
@@ -612,7 +673,7 @@ async function fetchAllMediaLinks(
           {
             url: videoInfo.url,
             type: "video",
-            downloader: "ytdlp",
+            downloader: "axios",
             id: Date.now().toString(),
             title: videoInfo.title,
           },
@@ -625,29 +686,62 @@ async function fetchAllMediaLinks(
     if (heavyRProfileMatch) {
       const username = heavyRProfileMatch[1];
       log(`[INFO] Detected heavy-r.com profile: ${username}`);
-      // Gather both videos and favorites
-      const allLinks = [];
+
+      // Step 1: Gather all video page URLs from the profile
+      const allPageLinks = [];
       for (const section of ["videos", "favorites"]) {
         let page = 0;
         let keepGoing = true;
         while (keepGoing) {
+          if (isCancelled) break;
           const pageUrl = `https://www.heavy-r.com/user/${username}?pro=${section}&p=${page}`;
           log(
             `[INFO] [heavy-r] Scanning ${section} page ${page} for user ${username}...`
           );
-          const links = await scrapeHeavyRProfileSection(pageUrl, log);
-          if (links.length === 0) {
+          const pageLinks = await scrapeHeavyRProfileSection(pageUrl, log);
+          if (pageLinks.length === 0) {
             keepGoing = false;
           } else {
-            allLinks.push(...links);
+            allPageLinks.push(...pageLinks);
             page++;
           }
         }
+        if (isCancelled) break;
       }
+
+      if (isCancelled) {
+        log(`[INFO] Scan for heavy-r profile ${username} cancelled.`);
+        return [];
+      }
+
       log(
-        `[INFO] [heavy-r] Found ${allLinks.length} videos/favorites for profile ${username}.`
+        `[INFO] [heavy-r] Found ${allPageLinks.length} video pages for profile ${username}. Now extracting direct links...`
       );
-      return allLinks;
+
+      // Step 2 & 3: Extract direct URLs and create final job list
+      const directVideoJobs = [];
+      for (const pageLink of allPageLinks) {
+        if (isCancelled) break;
+        const videoInfo = await scrapeHeavyRVideoPage(pageLink.url, log);
+        if (videoInfo && videoInfo.url) {
+          directVideoJobs.push({
+            url: videoInfo.url,
+            type: "video",
+            downloader: "axios",
+            id: pageLink.id,
+            title: videoInfo.title,
+          });
+        } else {
+          log(
+            `[ERROR] Could not extract video from heavy-r.com page: ${pageLink.url}`
+          );
+        }
+      }
+
+      log(
+        `[INFO] [heavy-r] Extracted ${directVideoJobs.length} direct video links.`
+      );
+      return directVideoJobs;
     }
   } catch (e) {
     log(`[ERROR] heavy-r.com handler failed: ${e.message}`);
@@ -735,12 +829,32 @@ async function fetchAllMediaLinks(
   }
 
   if (options.type === "ytdlp" && options.domain) {
-    // Check if this is a site that benefits from yt-dlp extraction + multi-threaded download
     const domain = options.domain;
+    // --- Bypass logic for specific hosts ---
+    if (BYPASS_YTDLP_HOSTS.some((host) => domain.includes(host))) {
+      log(
+        `[INFO] Bypassing multi-thread for ${domain}, using yt-dlp directly.`
+      );
+      return [
+        {
+          url: subredditUrl,
+          type: "video",
+          downloader: "ytdlp",
+          id: Date.now().toString(),
+          title: subredditUrl,
+        },
+      ];
+    }
+    // Check if this is a site that benefits from yt-dlp extraction + multi-threaded download
     if (YTDLP_EXTRACT_HOSTS.some((host) => domain.includes(host))) {
       log(`[INFO] Using hybrid extraction for ${domain}`);
       // Use yt-dlp for URL extraction, then multi-threaded download
-      const extractedInfo = await extractVideoUrlWithYtDlp(subredditUrl, log, Date.now().toString(), subredditUrl);
+      const extractedInfo = await extractVideoUrlWithYtDlp(
+        subredditUrl,
+        log,
+        Date.now().toString(),
+        subredditUrl
+      );
       if (extractedInfo && extractedInfo.url) {
         return [
           {
@@ -752,7 +866,9 @@ async function fetchAllMediaLinks(
           },
         ];
       } else {
-        log(`[INFO] Hybrid extraction failed, falling back to regular yt-dlp for ${domain}`);
+        log(
+          `[INFO] Hybrid extraction failed, falling back to regular yt-dlp for ${domain}`
+        );
         // Fallback to regular yt-dlp download if extraction fails
         return [
           {
@@ -1340,9 +1456,7 @@ async function scrapeHeavyRProfileSection(pageUrl, log) {
       }
       videoLinks.push({
         url: `https://www.heavy-r.com${href}`,
-        type: "video",
-        downloader: "ytdlp",
-        id: `${href}_${Date.now()}`,
+        id: href.replace(/[^a-zA-Z0-9]/g, ""),
         title: title || "heavy-r_video",
       });
     }
@@ -1466,33 +1580,6 @@ async function scrapeCrazyshitSeriesPage(seriesUrl, log) {
   }
 }
 
-const YT_DLP_HOSTS = [
-  "youtube.com",
-  "youtu.be",
-  "x.com",
-  "facebook.com",
-  "twitch.tv",
-  "instagram.com",
-  "xhamster.com",
-  "pornhub.com",
-  "hypnotube.com",
-  "xvideos.com",
-  "twitter.com",
-  "thisvid.com",
-  "webmshare.com",
-  "pmvhaven.com",
-  "ratedgross.com",
-  "pervertium.com",
-  "crazyshit.com",
-  "efukt.com",
-  "sissyhypno.com",
-  "boy18tube.com",
-  "cuteboytube.com",
-  "pornpawg.com",
-  "qosvideos.com",
-  "heavy-r.com",
-];
-
 async function extractMediaUrlsFromPost(
   originalPostData,
   log,
@@ -1604,9 +1691,23 @@ async function extractMediaUrlsFromPost(
           title: postTitle,
         });
       }
+    } else if (BYPASS_YTDLP_HOSTS.some((host) => domain.includes(host))) {
+      // Force yt-dlp for bypass hosts
+      urls.push({
+        url: postUrl,
+        type: "video",
+        downloader: "ytdlp",
+        id: postId,
+        title: postTitle,
+      });
     } else if (YTDLP_EXTRACT_HOSTS.some((host) => domain.includes(host))) {
       // Use yt-dlp for URL extraction, then multi-threaded download
-      const extractedInfo = await extractVideoUrlWithYtDlp(postUrl, log, postId, postTitle);
+      const extractedInfo = await extractVideoUrlWithYtDlp(
+        postUrl,
+        log,
+        postId,
+        postTitle
+      );
       if (extractedInfo && extractedInfo.url) {
         urls.push({
           url: extractedInfo.url,
@@ -1701,10 +1802,10 @@ async function downloadWithYtDlp(
       url,
     ];
     log(`[INFO] Starting Download: ${postTitle}`);
-    
+
     // Add to download queue
     const queueId = addToDownloadQueue(url, postTitle, postId);
-    
+
     const ytDlpProcess = spawn(ytDlpPath, args);
 
     // Track this process for hard stop functionality
@@ -1731,7 +1832,7 @@ async function downloadWithYtDlp(
     ytDlpProcess.on("close", (code) => {
       // Remove from active processes when done
       activeProcesses.delete(ytDlpProcess);
-      
+
       if (isCancelled) {
         removeFromDownloadQueue(queueId);
         log(`[INFO] Download cancelled: ${sanitizedTitle}`);
@@ -1764,21 +1865,27 @@ async function downloadWithYtDlp(
 }
 
 async function downloadFile(url, outputDir, log, postId, postTitle) {
+  const sanitizedTitle = sanitizeTitleForFilename(postTitle);
+  const urlObj = new URL(url);
+  let extension = path.extname(urlObj.pathname);
+  if (!extension) extension = ".jpg";
+  const fileName = `${sanitizedTitle}_${postId}${extension}`;
+  const outputPath = path.join(outputDir, fileName);
+  if (fs.existsSync(outputPath)) return false;
+
+  // Add to download queue
+  const queueId = addToDownloadQueue(url, postTitle, postId);
+
   try {
-    const sanitizedTitle = sanitizeTitleForFilename(postTitle);
-    const urlObj = new URL(url);
-    let extension = path.extname(urlObj.pathname);
-    if (!extension) extension = ".jpg";
-    const fileName = `${sanitizedTitle}_${postId}${extension}`;
-    const outputPath = path.join(outputDir, fileName);
-    if (fs.existsSync(outputPath)) return false;
-
-    // Add to download queue
-    const queueId = addToDownloadQueue(url, postTitle, postId);
-
     // Create abort controller for cancellation
     const controller = new AbortController();
     activeAxiosControllers.add(controller);
+
+    // Add agent to ignore SSL certificate errors
+    const https = require("https");
+    const unsafeAgent = new https.Agent({
+      rejectUnauthorized: false,
+    });
 
     const response = await axios({
       method: "GET",
@@ -1787,12 +1894,15 @@ async function downloadFile(url, outputDir, log, postId, postTitle) {
       timeout: 30000,
       headers: { "User-Agent": BROWSER_USER_AGENT },
       signal: controller.signal,
+      httpsAgent: unsafeAgent,
       onDownloadProgress: (progressEvent) => {
         if (progressEvent.total) {
-          const percent = Math.round((progressEvent.loaded / progressEvent.total) * 100);
+          const percent = Math.round(
+            (progressEvent.loaded / progressEvent.total) * 100
+          );
           updateDownloadProgress(queueId, percent);
         }
-      }
+      },
     });
     const writer = fs.createWriteStream(outputPath);
     response.data.pipe(writer);
@@ -1836,6 +1946,8 @@ async function downloadFile(url, outputDir, log, postId, postTitle) {
         error.response?.status || error.code
       }`
     );
+    // Ensure queue item is removed on failure
+    removeFromDownloadQueue(queueId);
     return false;
   }
 }
@@ -1865,43 +1977,25 @@ const MULTI_THREAD_CHUNK_SIZE = 1024 * 1024; // 1MB chunks
 const MULTI_THREAD_CONNECTIONS = 20; // Number of concurrent connections per file
 
 // --- Sites that benefit from yt-dlp extraction + multi-threaded download ---
-const YTDLP_EXTRACT_HOSTS = [
-  "thisvid.com",
-  "xhamster.com",
-  "pornhub.com",
-  "xvideos.com",
-  "hypnotube.com",
-  "webmshare.com",
-  "ratedgross.com",
-  "pervertium.com",
-  "efukt.com",
-  "sissyhypno.com",
-  "boy18tube.com",
-  "cuteboytube.com",
-  "pornpawg.com",
-];
 
 // --- yt-dlp URL extractor for multi-threaded downloading ---
 async function extractVideoUrlWithYtDlp(pageUrl, log, postId, postTitle) {
   return new Promise((resolve) => {
     const ytDlpPath = getYtDlpPath();
     if (!fs.existsSync(ytDlpPath)) {
-      log(`[YTDLP-EXTRACT] yt-dlp.exe not found, falling back to regular download`);
+      log(
+        `[YTDLP-EXTRACT] yt-dlp.exe not found, falling back to regular download`
+      );
       return resolve(null);
     }
 
     // Use yt-dlp to extract the direct video URL without downloading
-    const args = [
-      "--get-url",
-      "--no-playlist",
-      "--quiet",
-      pageUrl,
-    ];
+    const args = ["--get-url", "--no-playlist", "--quiet", pageUrl];
 
     log(`[YTDLP-EXTRACT] Extracting direct URL from: ${pageUrl}`);
     const ytDlpProcess = spawn(ytDlpPath, args);
-    let extractedUrl = '';
-    let errorOutput = '';
+    let extractedUrl = "";
+    let errorOutput = "";
 
     // Track this process for cancellation
     activeProcesses.add(ytDlpProcess);
@@ -1924,20 +2018,27 @@ async function extractVideoUrlWithYtDlp(pageUrl, log, postId, postTitle) {
 
       if (code === 0 && extractedUrl) {
         // Clean up the URL (remove any extra whitespace/newlines)
-        const cleanUrl = extractedUrl.split('\n')[0].trim();
-        if (cleanUrl.startsWith('http')) {
-          log(`[YTDLP-EXTRACT] Successfully extracted URL: ${cleanUrl.substring(0, 60)}...`);
+        const cleanUrl = extractedUrl.split("\n")[0].trim();
+        if (cleanUrl.startsWith("http")) {
+          log(
+            `[YTDLP-EXTRACT] Successfully extracted URL: ${cleanUrl.substring(
+              0,
+              60
+            )}...`
+          );
           resolve({
             url: cleanUrl,
             title: postTitle,
-            id: postId
+            id: postId,
           });
         } else {
           log(`[YTDLP-EXTRACT] Invalid URL extracted: ${cleanUrl}`);
           resolve(null);
         }
       } else {
-        log(`[YTDLP-EXTRACT] Failed to extract URL from ${pageUrl}: ${errorOutput.trim()}`);
+        log(
+          `[YTDLP-EXTRACT] Failed to extract URL from ${pageUrl}: ${errorOutput.trim()}`
+        );
         resolve(null);
       }
     });
@@ -1959,33 +2060,39 @@ async function extractThisvidVideoUrl(pageUrl, log) {
       timeout: 15000,
     });
     const html = response.data;
-    
+
     // Try multiple extraction methods for thisvid.com
     let videoUrl = null;
     let title = null;
-    
+
     // Method 1: Look for file_url in JavaScript
     const fileUrlMatch = html.match(/file_url['"]\s*:\s*['"]([^'"]+)['"]/i);
     if (fileUrlMatch && fileUrlMatch[1]) {
       videoUrl = fileUrlMatch[1];
       log(`[THISVID] Found video URL via file_url: ${videoUrl}`);
     }
-    
+
     // Method 2: Look for video sources in HTML
     if (!videoUrl) {
-      const videoSourceMatch = html.match(/<source[^>]+src=['"]([^'"]+\.mp4[^'"]*)['"][^>]*>/i);
+      const videoSourceMatch = html.match(
+        /<source[^>]+src=['"]([^'"]+\.mp4[^'"]*)['"][^>]*>/i
+      );
       if (videoSourceMatch && videoSourceMatch[1]) {
         videoUrl = videoSourceMatch[1];
         log(`[THISVID] Found video URL via source tag: ${videoUrl}`);
       }
     }
-    
+
     // Method 3: Look for mp4 URLs in script tags
     if (!videoUrl) {
-      const scriptMatches = html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/gi);
+      const scriptMatches = html.matchAll(
+        /<script[^>]*>([\s\S]*?)<\/script>/gi
+      );
       for (const scriptMatch of scriptMatches) {
         const scriptContent = scriptMatch[1];
-        const mp4Match = scriptContent.match(/https?:\/\/[^"'\s]+\.mp4[^"'\s]*/gi);
+        const mp4Match = scriptContent.match(
+          /https?:\/\/[^"'\s]+\.mp4[^"'\s]*/gi
+        );
         if (mp4Match && mp4Match[0]) {
           videoUrl = mp4Match[0];
           log(`[THISVID] Found video URL in script: ${videoUrl}`);
@@ -1993,21 +2100,21 @@ async function extractThisvidVideoUrl(pageUrl, log) {
         }
       }
     }
-    
+
     // Extract title
     const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
     if (titleMatch && titleMatch[1]) {
-      title = titleMatch[1].replace(/\s*-\s*ThisVid\.com\s*$/i, '').trim();
+      title = titleMatch[1].replace(/\s*-\s*ThisVid\.com\s*$/i, "").trim();
     }
-    
+
     if (videoUrl) {
       return {
         url: videoUrl,
         title: title || "thisvid_video",
-        supportsRangeRequests: true // thisvid typically supports range requests
+        supportsRangeRequests: true, // thisvid typically supports range requests
       };
     }
-    
+
     log(`[THISVID] No video URL found in page`);
     return null;
   } catch (error) {
@@ -2017,84 +2124,114 @@ async function extractThisvidVideoUrl(pageUrl, log) {
 }
 
 // --- Multi-threaded downloader ---
-async function downloadFileMultiThreaded(url, outputPath, log, queueId, title) {
+async function downloadFileMultiThreaded(url, outputPath, log, postId, title) {
+  const https = require("https");
+  const unsafeAgent = new https.Agent({
+    rejectUnauthorized: false,
+  });
+
+  // Add to download queue immediately
+  const queueId = addToDownloadQueue(url, title, postId);
+
   try {
     // First, check if the server supports range requests
     const headResponse = await axios.head(url, {
       headers: { "User-Agent": BROWSER_USER_AGENT },
       timeout: 10000,
+      httpsAgent: unsafeAgent,
     });
-    
-    const acceptsRanges = headResponse.headers['accept-ranges'] === 'bytes';
-    const contentLength = parseInt(headResponse.headers['content-length'], 10);
-    
-    if (!acceptsRanges || !contentLength || contentLength < MULTI_THREAD_CHUNK_SIZE * 2) {
-      log(`[MULTI-THREAD] Server doesn't support range requests or file too small, using single-threaded download`);
-      return await downloadFile(url, path.dirname(outputPath), log, queueId.split('_')[0], title);
+
+    const acceptsRanges = headResponse.headers["accept-ranges"] === "bytes";
+    const contentLength = parseInt(headResponse.headers["content-length"], 10);
+
+    if (
+      !acceptsRanges ||
+      !contentLength ||
+      contentLength < MULTI_THREAD_CHUNK_SIZE * 2
+    ) {
+      log(
+        `[MULTI-THREAD] Server doesn't support range requests or file too small, using single-threaded download`
+      );
+      // Fallback to single-threaded, passing the original postId
+      return await downloadFile(
+        url,
+        path.dirname(outputPath),
+        log,
+        postId,
+        title
+      );
     }
-    
-    log(`[MULTI-THREAD] Starting multi-threaded download: ${title} (${Math.round(contentLength / 1024 / 1024)}MB)`);
-    
+
+    log(
+      `[MULTI-THREAD] Starting multi-threaded download: ${title} (${Math.round(
+        contentLength / 1024 / 1024
+      )}MB)`
+    );
+
     // Calculate chunk ranges
     const chunkSize = Math.ceil(contentLength / MULTI_THREAD_CONNECTIONS);
     const chunks = [];
-    
+
     for (let i = 0; i < MULTI_THREAD_CONNECTIONS; i++) {
       const start = i * chunkSize;
       const end = Math.min(start + chunkSize - 1, contentLength - 1);
       chunks.push({ start, end, index: i });
     }
-    
+
     // Create temporary files for chunks
-    const tempDir = path.join(path.dirname(outputPath), '.temp_' + path.basename(outputPath));
+    const tempDir = path.join(
+      path.dirname(outputPath),
+      ".temp_" + path.basename(outputPath)
+    );
     await fsp.mkdir(tempDir, { recursive: true });
-    
+
     let downloadedBytes = 0;
     const progressUpdate = () => {
       const percent = Math.round((downloadedBytes / contentLength) * 100);
       updateDownloadProgress(queueId, percent);
     };
-    
+
     // Download chunks concurrently
     const downloadPromises = chunks.map(async (chunk) => {
       const chunkPath = path.join(tempDir, `chunk_${chunk.index}`);
       const controller = new AbortController();
       activeAxiosControllers.add(controller);
-      
+
       try {
         const response = await axios({
-          method: 'GET',
+          method: "GET",
           url: url,
           headers: {
-            'User-Agent': BROWSER_USER_AGENT,
-            'Range': `bytes=${chunk.start}-${chunk.end}`
+            "User-Agent": BROWSER_USER_AGENT,
+            Range: `bytes=${chunk.start}-${chunk.end}`,
           },
-          responseType: 'stream',
+          responseType: "stream",
           signal: controller.signal,
           timeout: 30000,
+          httpsAgent: unsafeAgent,
         });
-        
+
         const writer = fs.createWriteStream(chunkPath);
         response.data.pipe(writer);
-        
-        response.data.on('data', (data) => {
+
+        response.data.on("data", (data) => {
           downloadedBytes += data.length;
           progressUpdate();
         });
-        
+
         return new Promise((resolve, reject) => {
-          writer.on('finish', () => {
+          writer.on("finish", () => {
             activeAxiosControllers.delete(controller);
             resolve(chunkPath);
           });
-          writer.on('error', (err) => {
+          writer.on("error", (err) => {
             activeAxiosControllers.delete(controller);
             reject(err);
           });
-          controller.signal.addEventListener('abort', () => {
+          controller.signal.addEventListener("abort", () => {
             activeAxiosControllers.delete(controller);
             writer.destroy();
-            reject(new Error('Download aborted'));
+            reject(new Error("Download aborted"));
           });
         });
       } catch (error) {
@@ -2102,10 +2239,10 @@ async function downloadFileMultiThreaded(url, outputPath, log, queueId, title) {
         throw error;
       }
     });
-    
+
     // Wait for all chunks to complete
     const chunkPaths = await Promise.all(downloadPromises);
-    
+
     // Combine chunks into final file
     const finalWriter = fs.createWriteStream(outputPath);
     for (const chunkPath of chunkPaths) {
@@ -2113,16 +2250,31 @@ async function downloadFileMultiThreaded(url, outputPath, log, queueId, title) {
       finalWriter.write(chunkData);
     }
     finalWriter.end();
-    
+
     // Clean up temp files
-    await Promise.all(chunkPaths.map(chunkPath => fsp.unlink(chunkPath).catch(() => {})));
+    await Promise.all(
+      chunkPaths.map((chunkPath) => fsp.unlink(chunkPath).catch(() => {}))
+    );
     await fsp.rmdir(tempDir).catch(() => {});
-    
+
     log(`[SUCCESS] Download completed: ${title}`);
+    removeFromDownloadQueue(queueId);
     return true;
-    
   } catch (error) {
-    log(`[ERROR] Download failed: ${error.message}`);
-    return false;
+    log(
+      `[MULTI-THREAD] HEAD request failed (e.g., 405 Method Not Allowed). Falling back to single-threaded download for ${title}`
+    );
+    // Since the item is already in the queue, we can just call the single-threaded downloader.
+    // It will use the existing queue item.
+    const fallbackSuccess = await downloadFile(
+      url,
+      path.dirname(outputPath),
+      log,
+      postId, // Pass the original postId
+      title
+    );
+    // The success of the overall job depends on the fallback.
+    // The queue item will be removed by downloadFile on success/failure.
+    return fallbackSuccess;
   }
 }
