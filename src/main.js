@@ -61,7 +61,7 @@ const YT_DLP_HOSTS = [
   "pornpawg.com",
   "qosvideos.com",
   "heavy-r.com",
-  "hentaiera.com"
+  "hentaiera.com",
 ];
 
 // --- Hosts to bypass multi-thread downloader and use yt-dlp directly ---
@@ -405,11 +405,10 @@ const BROWSER_USER_AGENT =
 let redgifsToken = null;
 
 async function runDownloader(options, log) {
-  log(`[INFO] Starting download process...`);
+  log("[INFO] Starting download process...");
   isCancelled = false;
   isSkipping = false;
 
-  // Clear any previous active processes/controllers
   activeProcesses.clear();
   activeAxiosControllers.clear();
   const downloadPath = store.get("downloadPath");
@@ -428,223 +427,253 @@ async function runDownloader(options, log) {
     log(`[ERROR] Could not write to unhandled_links.log: ${e.message}`);
   }
   await fsp.mkdir(downloadPath, { recursive: true });
-  const subredditsToDownload = options.subreddits.filter(
+
+  const jobsToProcess = options.subreddits.filter(
     (s) => s.status === "pending"
   );
-  const totalJobs = subredditsToDownload.length;
+  const totalJobs = jobsToProcess.length;
   if (totalJobs === 0) {
-    log("[INFO] No pending subreddits to download.");
+    log("[INFO] No pending items to download.");
     log("--- ALL JOBS COMPLETE ---");
     return;
   }
   log(`[INFO] ${totalJobs} items are pending download.`);
-  if (mainWindow)
+  if (mainWindow) {
     mainWindow.webContents.send("queue-progress", {
       current: 0,
       total: totalJobs,
     });
+  }
 
-  // --- Build a flat download job queue ---
-  let downloadJobs = [];
-  for (let i = 0; i < totalJobs; i++) {
-    const subreddit = subredditsToDownload[i];
-    const { url: subredditUrl, type, domain } = subreddit;
-    let folderName;
-    if (type === "reddit") {
-      folderName = extractName(subredditUrl);
-    } else if (type === "ytdlp" && domain) {
-      folderName = domain;
-    } else {
-      folderName = "other";
+  // --- Producer-Consumer Setup ---
+  const downloadQueue = [];
+  let activeDownloadsCount = 0;
+  const activeDomains = new Set();
+  let totalLinksFound = 0;
+  let completedLinks = 0;
+
+  // --- Progress Tracking ---
+  const jobProgress = new Map();
+  jobsToProcess.forEach((job) => {
+    jobProgress.set(job.url, { found: 0, completed: 0, isScraping: true });
+  });
+
+  const updateOverallProgress = () => {
+    if (!mainWindow || isCancelled) return;
+
+    let totalWeightedProgress = 0;
+    let activeJobCount = 0;
+
+    for (const [url, progress] of jobProgress.entries()) {
+      activeJobCount++;
+      if (progress.found > 0) {
+        totalWeightedProgress += progress.completed / progress.found;
+      } else if (!progress.isScraping) {
+        // Scraping is done and found 0 files, so this job is 100% complete.
+        totalWeightedProgress += 1;
+      }
     }
+
+    const overallPercentage =
+      activeJobCount > 0 ? (totalWeightedProgress / activeJobCount) * 100 : 0;
+    const currentJob = Math.floor(totalWeightedProgress);
+
+    mainWindow.webContents.send("queue-progress", {
+      current: currentJob,
+      total: totalJobs,
+    });
+  };
+
+  // --- Consumer: The Download Worker ---
+  const downloadWorker = async () => {
+    while (!isCancelled) {
+      if (activeDownloadsCount >= MAX_SIMULTANEOUS_DOWNLOADS) {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        continue;
+      }
+
+      let jobToDownload = null;
+      let jobIndex = -1;
+
+      // Find an available job in the queue that doesn't conflict with active domains
+      for (let i = 0; i < downloadQueue.length; i++) {
+        const job = downloadQueue[i];
+        const domain = job.domain || "other";
+        if (!activeDomains.has(domain)) {
+          jobToDownload = job;
+          jobIndex = i;
+          break;
+        }
+      }
+
+      if (jobToDownload) {
+        // Remove job from queue and start processing
+        downloadQueue.splice(jobIndex, 1);
+        activeDownloadsCount++;
+        const domain = jobToDownload.domain || "other";
+        activeDomains.add(domain);
+
+        // --- Start the actual download ---
+        let success = false;
+        if (jobToDownload.link.downloader === "ytdlp") {
+          success = await downloadWithYtDlp(
+            jobToDownload.link.url,
+            jobToDownload.subredditDir,
+            log,
+            jobToDownload.link.id,
+            jobToDownload.link.title,
+            jobToDownload.link.seriesFolder
+          );
+        } else if (jobToDownload.link.downloader === "multi-thread") {
+          const sanitizedTitle = sanitizeTitleForFilename(
+            jobToDownload.link.title
+          );
+          const urlObj = new URL(jobToDownload.link.url);
+          let extension = path.extname(urlObj.pathname);
+          if (!extension) extension = ".mp4";
+          const fileName = `${sanitizedTitle}_${jobToDownload.link.id}${extension}`;
+          const outputPath = path.join(jobToDownload.subredditDir, fileName);
+          if (fs.existsSync(outputPath)) {
+            success = false;
+          } else {
+            success = await downloadFileMultiThreaded(
+              jobToDownload.link.url,
+              outputPath,
+              log,
+              jobToDownload.link.id,
+              jobToDownload.link.title
+            );
+          }
+        } else {
+          success = await downloadFile(
+            jobToDownload.link.url,
+            jobToDownload.subredditDir,
+            log,
+            jobToDownload.link.id,
+            jobToDownload.link.title,
+            jobToDownload.link.seriesFolder
+          );
+        }
+        // --- Download finished ---
+
+        activeDownloadsCount--;
+        activeDomains.delete(domain);
+        completedLinks++;
+
+        // Update progress for the specific job
+        const progress = jobProgress.get(jobToDownload.sourceUrl);
+        if (progress) {
+          progress.completed++;
+        }
+
+        if (mainWindow && !isCancelled) {
+          mainWindow.webContents.send("download-progress", {
+            current: completedLinks,
+            total: totalLinksFound,
+          });
+          updateOverallProgress();
+        }
+      } else {
+        // No available jobs, wait a bit
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+    }
+  };
+
+  // --- Producer: The Scraper ---
+  const scrapingPromises = jobsToProcess.map(async (job) => {
+    if (isCancelled) return;
+
+    const { url: jobUrl, type, domain } = job;
+    let folderName =
+      type === "reddit" ? extractName(jobUrl) : domain || "other";
     if (!folderName) {
-      log(`[ERROR] Invalid URL: ${subredditUrl}`);
-      if (mainWindow)
-        mainWindow.webContents.send("subreddit-complete", subredditUrl);
-      continue;
+      log(`[ERROR] Invalid URL, cannot determine folder name: ${jobUrl}`);
+      folderName = "invalid_url";
     }
     const subredditDir = path.join(downloadPath, folderName);
     await fsp.mkdir(subredditDir, { recursive: true });
+
     log(`[INFO] [${folderName}] Starting scan...`);
     try {
       const links = await fetchAllMediaLinks(
-        subredditUrl,
+        jobUrl,
         { ...options, type, domain },
         log,
         unhandledLogPath
       );
       log(`[INFO] [${folderName}] Found ${links.length} potential files.`);
-      for (let j = 0; j < links.length; j++) {
-        const link = links[j];
-        downloadJobs.push({
+
+      // Update progress tracking
+      const progress = jobProgress.get(jobUrl);
+      if (progress) {
+        progress.found = links.length;
+      }
+      totalLinksFound += links.length;
+
+      if (mainWindow) {
+        mainWindow.webContents.send("download-progress", {
+          current: completedLinks,
+          total: totalLinksFound,
+        });
+        updateOverallProgress();
+      }
+
+      for (const link of links) {
+        if (isCancelled) break;
+        const linkDomainMatch = link.url.match(
+          /https?:\/\/(?:www\.)?([^\/]+)/i
+        );
+        const linkDomain = linkDomainMatch ? linkDomainMatch[1] : "other";
+        downloadQueue.push({
           link,
           subredditDir,
-          folderName,
-          subredditUrl,
+          domain: linkDomain,
+          sourceUrl: jobUrl, // Link back to the original source job
         });
       }
     } catch (error) {
-      log(`[ERROR] [${folderName}] An error occurred: ${error.stack}`);
-      if (mainWindow) {
-        mainWindow.webContents.send("subreddit-complete", subredditUrl);
+      log(
+        `[ERROR] [${folderName}] An error occurred during scraping: ${error.stack}`
+      );
+    } finally {
+      if (!isCancelled) {
+        log(`[INFO] [${folderName}] Scan complete.`);
+        const progress = jobProgress.get(jobUrl);
+        if (progress) {
+          progress.isScraping = false;
+        }
+        // A job is complete if scraping is finished and all its found files have been downloaded.
+        // This covers the case of 0 files found, or all files being downloaded.
+        if (
+          progress &&
+          !progress.isScraping &&
+          progress.completed >= progress.found
+        ) {
+          if (mainWindow) {
+            mainWindow.webContents.send("subreddit-complete", jobUrl);
+          }
+        }
+        updateOverallProgress();
       }
     }
+  });
+
+  // Start download workers
+  const workers = [];
+  for (let i = 0; i < MAX_SIMULTANEOUS_DOWNLOADS; i++) {
+    workers.push(downloadWorker());
   }
 
-  // --- Parallel download logic ---
-  let activeDomains = new Set();
-  let activeCount = 0;
-  let completedCount = 0;
-  let totalLinks = downloadJobs.length;
+  // Wait for all scraping to finish
+  await Promise.all(scrapingPromises);
 
-  // Track completed subreddits
-  let subredditCompletionTracker = new Map();
-
-  // Initialize completion tracker
-  for (const subreddit of subredditsToDownload) {
-    const subredditJobs = downloadJobs.filter(
-      (job) => job.subredditUrl === subreddit.url
-    );
-    subredditCompletionTracker.set(subreddit.url, {
-      totalJobs: subredditJobs.length,
-      completedJobs: 0,
-      subreddit: subreddit,
-    });
+  // After scraping is done, wait for the download queue to empty
+  while (downloadQueue.length > 0 && !isCancelled) {
+    await new Promise((resolve) => setTimeout(resolve, 500));
   }
-
-  // Add a started flag to each job
-  downloadJobs.forEach((job) => (job.started = false));
-
-  async function tryStartDownloads() {
-    while (activeCount < MAX_SIMULTANEOUS_DOWNLOADS && !isCancelled) {
-      // Find the next eligible job: not started, domain not active
-      const nextJob = downloadJobs.find((job) => {
-        if (job.started) return false;
-        const match = job.link.url.match(/https?:\/\/(?:www\.)?([^\/]+)/i);
-        const domain = match ? match[1] : "other";
-        return !activeDomains.has(domain);
-      });
-      if (!nextJob) break;
-      const match = nextJob.link.url.match(/https?:\/\/(?:www\.)?([^\/]+)/i);
-      const domain = match ? match[1] : "other";
-      nextJob.started = true;
-      activeDomains.add(domain);
-      activeCount++;
-      // Start the download
-      (async () => {
-        // Check for cancellation before starting
-        if (isCancelled) {
-          completedCount++;
-          activeDomains.delete(domain);
-          activeCount--;
-          return;
-        }
-
-        let success = false;
-        if (nextJob.link.downloader === "ytdlp") {
-          success = await downloadWithYtDlp(
-            nextJob.link.url,
-            nextJob.subredditDir,
-            log,
-            nextJob.link.id,
-            nextJob.link.title,
-            nextJob.link.seriesFolder
-          );
-        } else if (nextJob.link.downloader === "multi-thread") {
-          // Use multi-threaded downloader for fast extraction sites
-          const sanitizedTitle = sanitizeTitleForFilename(nextJob.link.title);
-          const urlObj = new URL(nextJob.link.url);
-          let extension = path.extname(urlObj.pathname);
-          if (!extension) extension = ".mp4";
-          const fileName = `${sanitizedTitle}_${nextJob.link.id}${extension}`;
-          const outputPath = path.join(nextJob.subredditDir, fileName);
-
-          if (fs.existsSync(outputPath)) {
-            success = false; // Skip duplicate
-          } else {
-            success = await downloadFileMultiThreaded(
-              nextJob.link.url,
-              outputPath,
-              log,
-              nextJob.link.id,
-              nextJob.link.title
-            );
-          }
-        } else {
-          success = await downloadFile(
-            nextJob.link.url,
-            nextJob.subredditDir,
-            log,
-            nextJob.link.id,
-            nextJob.link.title,
-            nextJob.link.seriesFolder // Pass the subfolder name
-          );
-        }
-        completedCount++;
-        activeDomains.delete(domain);
-        activeCount--;
-
-        // Update subreddit completion tracking
-        const trackerEntry = subredditCompletionTracker.get(
-          nextJob.subredditUrl
-        );
-        if (trackerEntry) {
-          trackerEntry.completedJobs++;
-
-          // Check if this subreddit is complete
-          if (trackerEntry.completedJobs === trackerEntry.totalJobs) {
-            log(
-              `[INFO] Job - ${nextJob.subredditUrl} completed (${trackerEntry.completedJobs}/${trackerEntry.totalJobs} files)`
-            );
-            if (mainWindow) {
-              mainWindow.webContents.send(
-                "subreddit-complete",
-                nextJob.subredditUrl
-              );
-            }
-          }
-        }
-
-        // Skip progress updates if cancelled
-        if (!isCancelled && mainWindow) {
-          mainWindow.webContents.send("download-progress", {
-            current: completedCount,
-            total: totalLinks,
-          });
-          // Update the overall queue progress bar after each download
-          mainWindow.webContents.send("queue-progress", {
-            current: completedCount,
-            total: totalLinks,
-          });
-        }
-        // Mark all jobs as complete if all downloads are done
-        if (completedCount === totalLinks) {
-          log("--- ALL JOBS COMPLETE ---");
-          if (mainWindow) {
-            mainWindow.webContents.send("queue-progress", {
-              current: totalJobs,
-              total: totalJobs,
-            });
-            // Mark any remaining subreddits as complete
-            for (const [subredditUrl, tracker] of subredditCompletionTracker) {
-              if (tracker.completedJobs < tracker.totalJobs) {
-                mainWindow.webContents.send("subreddit-complete", subredditUrl);
-              }
-            }
-          }
-        }
-        // Try to start more downloads if possible (unless cancelled)
-        if (!isCancelled) {
-          await tryStartDownloads();
-        }
-      })();
-    }
-  }
-
-  // Start up to MAX_SIMULTANEOUS_DOWNLOADS downloads
-  await tryStartDownloads();
-  // Wait for all downloads to finish
-  while (completedCount < totalLinks && !isCancelled && !isSkipping) {
+  // And for active downloads to finish
+  while (activeDownloadsCount > 0 && !isCancelled) {
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
 
@@ -652,7 +681,13 @@ async function runDownloader(options, log) {
     log("--- DOWNLOADS CANCELLED BY USER ---");
   } else if (isSkipping) {
     log("--- DOWNLOADS SKIPPED BY USER ---");
+  } else {
+    log("--- ALL JOBS COMPLETE ---");
   }
+
+  // Final cleanup signal to ensure workers exit if they haven't already
+  isCancelled = true;
+  await Promise.all(workers);
 }
 
 // Patch fetchAllMediaLinks to handle yt-dlp links directly
@@ -1352,10 +1387,8 @@ async function scrapeHeavyRVideoPage(pageUrl, log) {
     if (videoSource) {
       url = videoSource;
     }
-    console.log("DEBUG: videoSource found:", videoSource);
     // Title: <h1 class="video-title"> or <title>
     title = ($("h1.video-title").text() || $("title").text() || "").trim();
-    console.log("DEBUG: title found:", title);
     if (url) {
       return {
         url,
@@ -1589,8 +1622,8 @@ async function scrapeHentaiEraGallery(galleryUrl, log) {
         url: imageUrl,
         type: "image",
         downloader: "axios", // Use the standard single-threaded downloader
-        id: `${subfolderName}_${pageNum}`,
-        title: `${subfolderName}_p${pageNum}`,
+        id: `${subfolderName}_${pageNum}`, // Unique ID for tracking
+        title: `page_${pageNum}`, // Simple title to prevent long filenames
         // Custom property to tell the downloader to use a subfolder
         seriesFolder: subfolderName,
       });
@@ -1638,13 +1671,15 @@ async function scrapeHentaiEraCollection(collectionUrl, log) {
           $("h1.tag_title").first().text().trim();
         if (collectionTitle) {
           // Clean up title like "Read all 1,075 crimson XXX Galleries"
-          collectionFolderName = sanitizeTitleForFilename(
-            collectionTitle
-              .replace(/Read all [\d,]+/, "")
-              .replace(/XXX Galleries/, "")
-              .trim()
+          const cleanedTitle = collectionTitle
+            .replace(/Read all [\d,]+/, "")
+            .replace(/XXX Galleries/, "")
+            .trim();
+          // Sanitize for directory name, using a shorter length limit
+          collectionFolderName = sanitizeTitleForFilename(cleanedTitle, 80);
+          log(
+            `[HentaiEra] Determined collection folder: ${collectionFolderName}`
           );
-          log(`[HentaiEra] Determined collection folder: ${collectionFolderName}`);
         } else {
           log("[HentaiEra] Could not determine collection folder name.");
         }
@@ -1705,7 +1740,10 @@ async function scrapeHentaiEraCollection(collectionUrl, log) {
       if (collectionFolderName && galleryJobs.length > 0) {
         galleryJobs.forEach((job) => {
           if (job.seriesFolder) {
-            job.seriesFolder = path.join(collectionFolderName, job.seriesFolder);
+            job.seriesFolder = path.join(
+              collectionFolderName,
+              job.seriesFolder
+            );
           }
         });
       }
@@ -1716,7 +1754,7 @@ async function scrapeHentaiEraCollection(collectionUrl, log) {
     return allDownloadJobs;
   } catch (error) {
     log(
-      `[HentaiEra] Failed to scrape collection ${collectionUrl}: ${error.message}`
+      `[ERROR] Failed to scrape collection ${collectionUrl}: ${error.message}`
     );
     return [];
   }
@@ -2105,7 +2143,9 @@ async function downloadFile(
   const urlObj = new URL(url);
   let extension = path.extname(urlObj.pathname);
   if (!extension) extension = ".jpg";
-  const fileName = `${sanitizedTitle}_${postId}${extension}`;
+  // The postTitle from the scraper is now simple (e.g., "page_2"),
+  // and the postId is used for the queue, so we don't need it in the filename.
+  const fileName = `${sanitizedTitle}${extension}`;
 
   const finalOutputDir = seriesFolder
     ? path.join(outputDir, seriesFolder)
@@ -2118,8 +2158,8 @@ async function downloadFile(
       await fsp.mkdir(finalOutputDir, { recursive: true });
     }
     if (fs.existsSync(outputPath)) {
-      // log(`[INFO] Skipping duplicate (axios): ${fileName}`);
-      return false;
+      log(`[INFO] Skipping duplicate (axios): ${fileName}`);
+      return true; // Treat as success for progress tracking
     }
   } catch (e) {
     log(`[ERROR] Could not check/create directory for download: ${e.message}`);
@@ -2205,10 +2245,27 @@ async function downloadFile(
   }
 }
 
-function sanitizeTitleForFilename(title) {
+function sanitizeTitleForFilename(title, maxLength = 80) {
   if (!title) return "untitled";
-  const illegalChars = /[\\/:\*\?"<>\|]/g;
-  return title.replace(illegalChars, "").replace(/\s+/g, "_").substring(0, 150);
+
+  // Whitelist of safe characters. Anything not in this list will be removed.
+  const whitelist = /[^a-zA-Z0-9\s\-_\[\]\(\)\{\}]/g;
+  
+  // 1. Remove any character that is not in the whitelist.
+  let sanitized = title.replace(whitelist, '');
+
+  // 2. Replace whitespace with a single underscore.
+  sanitized = sanitized.replace(/\s+/g, '_');
+
+  // 3. Truncate to the specified maximum length.
+  if (sanitized.length > maxLength) {
+    sanitized = sanitized.substring(0, maxLength);
+  }
+
+  // 4. Clean up any trailing/leading underscores that might result from truncation.
+  sanitized = sanitized.replace(/^_+|_+$/g, '');
+
+  return sanitized || "untitled";
 }
 
 function extractName(url) {
