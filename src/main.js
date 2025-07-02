@@ -593,19 +593,30 @@ async function runDownloader(options, log) {
     if (isCancelled) return;
 
     const { url: jobUrl, type, domain } = job;
-    let folderName =
-      type === "reddit" ? extractName(jobUrl) : domain || "other";
-    if (domain === MOTHERLESS_HOST) {
-      folderName = MOTHERLESS_HOST;
+    let subredditDir;
+    
+    if (type === "reddit") {
+      // For Reddit: reddit.com/subreddit_name/ (subfolders for images/videos created later)
+      const subredditName = extractName(jobUrl);
+      if (!subredditName) {
+        log(`[ERROR] Invalid Reddit URL, cannot determine subreddit name: ${jobUrl}`);
+        subredditDir = path.join(downloadPath, "reddit.com", "invalid_url");
+      } else {
+        subredditDir = path.join(downloadPath, "reddit.com", subredditName);
+      }
+    } else {
+      // For non-Reddit: use domain as before
+      let folderName = domain || "other";
+      if (domain === MOTHERLESS_HOST) {
+        folderName = MOTHERLESS_HOST;
+      }
+      subredditDir = path.join(downloadPath, folderName);
     }
-    if (!folderName) {
-      log(`[ERROR] Invalid URL, cannot determine folder name: ${jobUrl}`);
-      folderName = "invalid_url";
-    }
-    const subredditDir = path.join(downloadPath, folderName);
+    
     await fsp.mkdir(subredditDir, { recursive: true });
 
-    log(`[INFO] [${folderName}] Starting scan...`);
+    const displayName = type === "reddit" ? extractName(jobUrl) || "invalid_url" : (domain === MOTHERLESS_HOST ? MOTHERLESS_HOST : domain || "other");
+    log(`[INFO] [${displayName}] Starting scan...`);
     try {
       const links = await fetchAllMediaLinks(
         jobUrl,
@@ -613,7 +624,7 @@ async function runDownloader(options, log) {
         log,
         unhandledLogPath
       );
-      log(`[INFO] [${folderName}] Found ${links.length} potential files.`);
+      log(`[INFO] [${displayName}] Found ${links.length} potential files.`);
 
       // Update progress tracking
       const progress = jobProgress.get(jobUrl);
@@ -645,11 +656,11 @@ async function runDownloader(options, log) {
       }
     } catch (error) {
       log(
-        `[ERROR] [${folderName}] An error occurred during scraping: ${error.stack}`
+        `[ERROR] [${displayName}] An error occurred during scraping: ${error.stack}`
       );
     } finally {
       if (!isCancelled) {
-        log(`[INFO] [${folderName}] Scan complete.`);
+        log(`[INFO] [${displayName}] Scan complete.`);
         const progress = jobProgress.get(jobUrl);
         if (progress) {
           progress.isScraping = false;
@@ -1894,9 +1905,11 @@ async function extractMediaUrlsFromPost(
           id: postId,
           title: postTitle,
         });
-    } else if (domain === "i.redd.it") {
+    } else if (domain === "i.redd.it" || domain.includes("redd.it")) {
+      // Clean any amp; entities from Reddit URLs (remove all instances of "amp;")
+      const cleanUrl = postUrl.replace(/amp;/g, "");
       urls.push({
-        url: postUrl,
+        url: cleanUrl,
         type: "image",
         downloader: "axios",
         id: postId,
@@ -1904,14 +1917,17 @@ async function extractMediaUrlsFromPost(
       });
     } else if (is_gallery && media_metadata) {
       Object.values(media_metadata).forEach((item, i) => {
-        if (item?.s?.u)
+        if (item?.s?.u) {
+          // Clean any amp; entities from Reddit gallery URLs (remove all instances of "amp;")
+          const cleanUrl = item.s.u.replace(/amp;/g, "");
           urls.push({
-            url: item.s.u.replace(/&/g, "&"),
+            url: cleanUrl,
             type: "image",
             downloader: "axios",
             id: `${postId}_${i}`,
             title: postTitle,
           });
+        }
       });
     } else if (domain.includes("redgifs.com")) {
       const token = await getRedgifsToken(log);
@@ -2045,16 +2061,27 @@ async function downloadWithYtDlp(
     let outputPath;
     if (seriesFolder) {
       outputPath = path.join(outputDir, seriesFolder, fileNameTemplate);
+    } else if (outputDir.includes(path.join("reddit.com"))) {
+      // For Reddit downloads, organize into videos subfolder (yt-dlp typically handles videos)
+      outputPath = path.join(outputDir, "videos", fileNameTemplate);
     } else {
       outputPath = path.join(outputDir, fileNameTemplate);
     }
     try {
-      const dirToCheck = seriesFolder
-        ? path.join(outputDir, seriesFolder)
-        : outputDir;
+      let dirToCheck;
+      if (seriesFolder) {
+        dirToCheck = path.join(outputDir, seriesFolder);
+      } else if (outputDir.includes(path.join("reddit.com"))) {
+        dirToCheck = path.join(outputDir, "videos");
+      } else {
+        dirToCheck = outputDir;
+      }
+      
+      // Always ensure the directory exists
       if (!fs.existsSync(dirToCheck)) {
         fs.mkdirSync(dirToCheck, { recursive: true });
       }
+      
       const filesInDir = fs.readdirSync(dirToCheck);
       const baseName = `${sanitizedTitle}_${postId}`;
       const fileExists = filesInDir.some(
@@ -2159,20 +2186,30 @@ async function downloadFile(
   const urlObj = new URL(url);
   let extension = path.extname(urlObj.pathname);
   if (!extension) extension = ".jpg";
-  // The postTitle from the scraper is now simple (e.g., "page_2"),
-  // and the postId is used for the queue, so we don't need it in the filename.
-  const fileName = `${sanitizedTitle}${extension}`;
+  
+  // For gallery images, postId contains the unique identifier (e.g., "postId_0", "postId_1")
+  // For regular images, postId is just the post ID
+  // Always include the postId to ensure unique filenames for gallery images
+  const fileName = `${sanitizedTitle}_${postId}${extension}`;
 
-  const finalOutputDir = seriesFolder
-    ? path.join(outputDir, seriesFolder)
-    : outputDir;
+  // Check if this is a Reddit download and organize into images/videos subfolders
+  let finalOutputDir;
+  if (seriesFolder) {
+    finalOutputDir = path.join(outputDir, seriesFolder);
+  } else if (outputDir.includes(path.join("reddit.com"))) {
+    // For Reddit downloads, organize by file type
+    const mediaType = extension.match(/\.(mp4|webm|mov|avi|mkv)$/i) ? "videos" : "images";
+    finalOutputDir = path.join(outputDir, mediaType);
+  } else {
+    finalOutputDir = outputDir;
+  }
+  
   const outputPath = path.join(finalOutputDir, fileName);
 
   try {
-    if (seriesFolder) {
-      // Ensure the subdirectory exists
-      await fsp.mkdir(finalOutputDir, { recursive: true });
-    }
+    // Always ensure the final output directory exists
+    await fsp.mkdir(finalOutputDir, { recursive: true });
+    
     if (fs.existsSync(outputPath)) {
       log(`[INFO] Skipping duplicate (axios): ${fileName}`);
       return true; // Treat as success for progress tracking
