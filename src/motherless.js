@@ -23,12 +23,12 @@ async function scrapeMotherlessPage(pageUrl, log) {
         const usernameElement = initialDom.window.document.querySelector('.member-bio-username');
         if (usernameElement) {
             subfolderName = usernameElement.textContent.trim().replace(/[^a-zA-Z0-9\-_]/g, '');
-            log(`[Motherless] Found username: ${subfolderName}. Files will be saved to 'motherless.com/${subfolderName}'.`);
+            log(`[INFO] Found username: ${subfolderName}. Files will be saved to 'motherless.com/${subfolderName}'.`);
         } else {
-            log('[Motherless] Could not find username. Files will be saved in the base "motherless.com" folder.');
+            log('[INFO] Could not find username. Files will be saved in the base "motherless.com" folder.');
         }
     } catch (error) {
-        log(`[Motherless] Could not determine username for subfolder: ${error.message}`);
+        log(`[ERROR] Could not determine username for subfolder: ${error.message}`);
     }
 
     const urlObject = new URL(currentPageUrl);
@@ -37,10 +37,10 @@ async function scrapeMotherlessPage(pageUrl, log) {
     const shouldScrapeImages = !typeParam || typeParam === 'i' || typeParam === 'a';
     const shouldScrapeVideos = !typeParam || typeParam === 'v' || typeParam === 'a';
 
-    log(`[Motherless] Starting scrape for ${pageUrl}. Images: ${shouldScrapeImages}, Videos: ${shouldScrapeVideos}`);
+    log(`[INFO] Starting scrape for ${pageUrl}. Images: ${shouldScrapeImages}, Videos: ${shouldScrapeVideos}`);
 
     while (currentPageUrl) {
-        log(`[Motherless] Scraping page: ${currentPageUrl}`);
+        log(`[INFO] Scraping page: ${currentPageUrl}`);
         try {
             const response = await fetch(currentPageUrl);
             const html = await response.text();
@@ -66,7 +66,7 @@ async function scrapeMotherlessPage(pageUrl, log) {
                             seriesFolder: subfolderName, // Use seriesFolder for sub-directory
                         });
                     } catch (e) {
-                        log(`[Motherless] Error processing image thumbnail URL ${thumbUrl}: ${e.message}`);
+                        log(`[ERROR] Error processing image thumbnail URL ${thumbUrl}: ${e.message}`);
                     }
                 }
             }
@@ -90,7 +90,7 @@ async function scrapeMotherlessPage(pageUrl, log) {
                             seriesFolder: subfolderName, // Use seriesFolder for sub-directory
                         });
                     } catch(e) {
-                        log(`[Motherless] Error processing video URL ${videoUrl}: ${e.message}`);
+                        log(`[ERROR] Error processing video URL ${videoUrl}: ${e.message}`);
                     }
                 }
             }
@@ -103,12 +103,12 @@ async function scrapeMotherlessPage(pageUrl, log) {
                 currentPageUrl = null;
             }
         } catch (error) {
-            log(`[Motherless] Failed to process page ${currentPageUrl}: ${error.message}`);
+            log(`[ERROR] Failed to process page ${currentPageUrl}: ${error.message}`);
             currentPageUrl = null; // Stop if a page fails
         }
     }
 
-    log(`[Motherless] Found ${allLinks.length} total links.`);
+    log(`[INFO] Found ${allLinks.length} total links.`);
     return allLinks;
 }
 
