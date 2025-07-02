@@ -5,6 +5,7 @@ const fsp = require("fs").promises;
 const axios = require("axios");
 const { autoUpdater } = require("electron-updater");
 const { spawn } = require("child_process");
+const { scrapeMotherlessPage } = require("./motherless.js");
 
 let Store;
 let store;
@@ -35,6 +36,7 @@ const YTDLP_EXTRACT_HOSTS = [
   "pornpawg.com",
   "heavy-r.com",
   "crazyshit.com",
+  "motherless.com",
 ];
 const YT_DLP_HOSTS = [
   "youtube.com",
@@ -62,13 +64,15 @@ const YT_DLP_HOSTS = [
   "qosvideos.com",
   "heavy-r.com",
   "hentaiera.com",
+  "motherless.com",
 ];
 
 // --- Hosts to bypass multi-thread downloader and use yt-dlp directly ---
-const BYPASS_YTDLP_HOSTS = ["pornpawg.com", "boy18tube.com"];
+const BYPASS_YTDLP_HOSTS = ["pornpawg.com", "boy18tube.com", "motherless.com"];
 
 // --- Hosts that require special image gallery scraping ---
 const IMAGE_GALLERY_HOSTS = ["hentaiera.com"];
+const MOTHERLESS_HOST = "motherless.com";
 
 function appLog(message) {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -499,7 +503,11 @@ async function runDownloader(options, log) {
       for (let i = 0; i < downloadQueue.length; i++) {
         const job = downloadQueue[i];
         const domain = job.domain || "other";
-        if (!activeDomains.has(domain)) {
+        // Allow multiple concurrent downloads for image files, especially from motherless.com
+        const isImageDownload = job.link.type === "image";
+        const isMotherlessDomain = domain.includes("motherless.com");
+        
+        if (!activeDomains.has(domain) || (isImageDownload && isMotherlessDomain)) {
           jobToDownload = job;
           jobIndex = i;
           break;
@@ -587,6 +595,9 @@ async function runDownloader(options, log) {
     const { url: jobUrl, type, domain } = job;
     let folderName =
       type === "reddit" ? extractName(jobUrl) : domain || "other";
+    if (domain === MOTHERLESS_HOST) {
+      folderName = MOTHERLESS_HOST;
+    }
     if (!folderName) {
       log(`[ERROR] Invalid URL, cannot determine folder name: ${jobUrl}`);
       folderName = "invalid_url";
@@ -701,6 +712,11 @@ async function fetchAllMediaLinks(
   try {
     const urlObject = new URL(subredditUrl);
     const domain = urlObject.hostname.replace(/^www\./, "");
+
+    if (domain === MOTHERLESS_HOST) {
+      log(`[INFO] Detected Motherless host: ${domain}`);
+      return await scrapeMotherlessPage(subredditUrl, log);
+    }
 
     if (IMAGE_GALLERY_HOSTS.includes(domain)) {
       log(`[INFO] Detected image gallery host: ${domain}`);
@@ -2250,12 +2266,12 @@ function sanitizeTitleForFilename(title, maxLength = 80) {
 
   // Whitelist of safe characters. Anything not in this list will be removed.
   const whitelist = /[^a-zA-Z0-9\s\-_\[\]\(\)\{\}]/g;
-  
+
   // 1. Remove any character that is not in the whitelist.
-  let sanitized = title.replace(whitelist, '');
+  let sanitized = title.replace(whitelist, "");
 
   // 2. Replace whitespace with a single underscore.
-  sanitized = sanitized.replace(/\s+/g, '_');
+  sanitized = sanitized.replace(/\s+/g, "_");
 
   // 3. Truncate to the specified maximum length.
   if (sanitized.length > maxLength) {
@@ -2263,7 +2279,7 @@ function sanitizeTitleForFilename(title, maxLength = 80) {
   }
 
   // 4. Clean up any trailing/leading underscores that might result from truncation.
-  sanitized = sanitized.replace(/^_+|_+$/g, '');
+  sanitized = sanitized.replace(/^_+|_+$/g, "");
 
   return sanitized || "untitled";
 }
