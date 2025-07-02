@@ -61,10 +61,14 @@ const YT_DLP_HOSTS = [
   "pornpawg.com",
   "qosvideos.com",
   "heavy-r.com",
+  "hentaiera.com"
 ];
 
 // --- Hosts to bypass multi-thread downloader and use yt-dlp directly ---
 const BYPASS_YTDLP_HOSTS = ["pornpawg.com", "boy18tube.com"];
+
+// --- Hosts that require special image gallery scraping ---
+const IMAGE_GALLERY_HOSTS = ["hentaiera.com"];
 
 function appLog(message) {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -572,7 +576,8 @@ async function runDownloader(options, log) {
             nextJob.subredditDir,
             log,
             nextJob.link.id,
-            nextJob.link.title
+            nextJob.link.title,
+            nextJob.link.seriesFolder // Pass the subfolder name
           );
         }
         completedCount++;
@@ -657,6 +662,29 @@ async function fetchAllMediaLinks(
   log,
   unhandledLogPath
 ) {
+  // --- Image Gallery Host Logic ---
+  try {
+    const urlObject = new URL(subredditUrl);
+    const domain = urlObject.hostname.replace(/^www\./, "");
+
+    if (IMAGE_GALLERY_HOSTS.includes(domain)) {
+      log(`[INFO] Detected image gallery host: ${domain}`);
+      if (domain === "hentaiera.com") {
+        // Match specific gallery pages
+        if (urlObject.pathname.startsWith("/gallery/")) {
+          return await scrapeHentaiEraGallery(subredditUrl, log);
+        }
+        // Potentially handle other page types like /artists/ or search results later
+        log(
+          `[WARN] Non-gallery hentaiera.com URL detected. This is not yet supported: ${subredditUrl}`
+        );
+        return [];
+      }
+    }
+  } catch (e) {
+    log(`[ERROR] Image gallery handler failed: ${e.message}`);
+  }
+
   // --- heavy-r.com custom logic ---
   try {
     const heavyRVideoMatch = subredditUrl.match(
@@ -1493,6 +1521,92 @@ async function scrapeQosvideosPage(pageUrl, log) {
   return null;
 }
 
+// --- HentaiEra.com Gallery Scraper ---
+async function scrapeHentaiEraGallery(galleryUrl, log) {
+  log(`[HentaiEra] Scraping gallery: ${galleryUrl}`);
+  try {
+    const response = await axios.get(galleryUrl, {
+      headers: { "User-Agent": BROWSER_USER_AGENT },
+    });
+    const html = response.data;
+    const cheerio = require("cheerio");
+    const $ = cheerio.load(html);
+
+    // 1. Extract gallery title for subfolder
+    const galleryTitle = $("h1").first().text().trim();
+    if (!galleryTitle) {
+      log("[HentaiEra] Could not find gallery title.");
+      return [];
+    }
+    const subfolderName = sanitizeTitleForFilename(galleryTitle);
+
+    // 2. Extract the image data from the script tag
+    const scriptTag = $("script")
+      .filter((i, el) => {
+        return $(el).html().includes("var g_th = $.parseJSON");
+      })
+      .html();
+
+    if (!scriptTag) {
+      log("[HentaiEra] Could not find the g_th script tag.");
+      return [];
+    }
+
+    const jsonMatch = scriptTag.match(/parseJSON\('(.+?)'\);/);
+    if (!jsonMatch || !jsonMatch[1]) {
+      log("[HentaiEra] Could not extract JSON from script tag.");
+      return [];
+    }
+
+    const imagesJson = JSON.parse(jsonMatch[1]);
+
+    // 3. Get the base URL from a thumbnail
+    const thumbSrc = $("#append_thumbs .gthumb a img").first().attr("data-src");
+    if (!thumbSrc) {
+      log("[HentaiEra] Could not find a thumbnail source to build base URL.");
+      return [];
+    }
+    const baseUrl = thumbSrc.substring(0, thumbSrc.lastIndexOf("/") + 1);
+
+    // 4. Helper to get file extension
+    const getFileExtension = (key) => {
+      if (key === "j") return ".jpg";
+      if (key === "p") return ".png";
+      if (key === "b") return ".bmp";
+      if (key === "g") return ".gif";
+      if (key === "w") return ".webp";
+      return ".jpg"; // Default
+    };
+
+    // 5. Build the list of download jobs
+    const downloadJobs = [];
+    for (const pageNum in imagesJson) {
+      const imageData = imagesJson[pageNum];
+      const extKey = imageData.split(",")[0];
+      const extension = getFileExtension(extKey);
+      const imageUrl = `${baseUrl}${pageNum}${extension}`;
+
+      downloadJobs.push({
+        url: imageUrl,
+        type: "image",
+        downloader: "axios", // Use the standard single-threaded downloader
+        id: `${subfolderName}_${pageNum}`,
+        title: `${subfolderName}_p${pageNum}`,
+        // Custom property to tell the downloader to use a subfolder
+        seriesFolder: subfolderName,
+      });
+    }
+
+    log(
+      `[HentaiEra] Found ${downloadJobs.length} images in gallery "${galleryTitle}".`
+    );
+    return downloadJobs;
+  } catch (error) {
+    log(`[HentaiEra] Failed to scrape gallery ${galleryUrl}: ${error.message}`);
+    return [];
+  }
+}
+
 async function scrapeImgurAlbum(albumUrl, log) {
   const images = [];
   try {
@@ -1864,14 +1978,38 @@ async function downloadWithYtDlp(
   });
 }
 
-async function downloadFile(url, outputDir, log, postId, postTitle) {
+async function downloadFile(
+  url,
+  outputDir,
+  log,
+  postId,
+  postTitle,
+  seriesFolder
+) {
   const sanitizedTitle = sanitizeTitleForFilename(postTitle);
   const urlObj = new URL(url);
   let extension = path.extname(urlObj.pathname);
   if (!extension) extension = ".jpg";
   const fileName = `${sanitizedTitle}_${postId}${extension}`;
-  const outputPath = path.join(outputDir, fileName);
-  if (fs.existsSync(outputPath)) return false;
+
+  const finalOutputDir = seriesFolder
+    ? path.join(outputDir, seriesFolder)
+    : outputDir;
+  const outputPath = path.join(finalOutputDir, fileName);
+
+  try {
+    if (seriesFolder) {
+      // Ensure the subdirectory exists
+      await fsp.mkdir(finalOutputDir, { recursive: true });
+    }
+    if (fs.existsSync(outputPath)) {
+      // log(`[INFO] Skipping duplicate (axios): ${fileName}`);
+      return false;
+    }
+  } catch (e) {
+    log(`[ERROR] Could not check/create directory for download: ${e.message}`);
+    return false;
+  }
 
   // Add to download queue
   const queueId = addToDownloadQueue(url, postTitle, postId);
