@@ -673,12 +673,11 @@ async function fetchAllMediaLinks(
         // Match specific gallery pages
         if (urlObject.pathname.startsWith("/gallery/")) {
           return await scrapeHentaiEraGallery(subredditUrl, log);
+        } else {
+          // Assume any other hentaiera.com link is a collection page (artist, tag, search, etc.)
+          log(`[INFO] Detected HentaiEra collection page: ${subredditUrl}`);
+          return await scrapeHentaiEraCollection(subredditUrl, log);
         }
-        // Potentially handle other page types like /artists/ or search results later
-        log(
-          `[WARN] Non-gallery hentaiera.com URL detected. This is not yet supported: ${subredditUrl}`
-        );
-        return [];
       }
     }
   } catch (e) {
@@ -1523,7 +1522,7 @@ async function scrapeQosvideosPage(pageUrl, log) {
 
 // --- HentaiEra.com Gallery Scraper ---
 async function scrapeHentaiEraGallery(galleryUrl, log) {
-  log(`[HentaiEra] Scraping gallery: ${galleryUrl}`);
+  log(`[INFO] Scraping gallery: ${galleryUrl}`);
   try {
     const response = await axios.get(galleryUrl, {
       headers: { "User-Agent": BROWSER_USER_AGENT },
@@ -1603,6 +1602,122 @@ async function scrapeHentaiEraGallery(galleryUrl, log) {
     return downloadJobs;
   } catch (error) {
     log(`[HentaiEra] Failed to scrape gallery ${galleryUrl}: ${error.message}`);
+    return [];
+  }
+}
+
+// --- HentaiEra.com Collection Scraper ---
+async function scrapeHentaiEraCollection(collectionUrl, log) {
+  log(`[HentaiEra] Scraping collection: ${collectionUrl}`);
+  const allGalleryLinks = new Set(); // Use a Set to avoid duplicate gallery links
+  let allDownloadJobs = [];
+  let collectionFolderName = null;
+
+  try {
+    const baseUrl = new URL(collectionUrl).origin;
+    let nextUrl = collectionUrl;
+    let isFirstPage = true;
+
+    while (nextUrl) {
+      if (isCancelled) {
+        log(`[INFO] Collection scan cancelled.`);
+        break;
+      }
+      log(`[INFO] Scanning page: ${nextUrl}`);
+      const response = await axios.get(nextUrl, {
+        headers: { "User-Agent": BROWSER_USER_AGENT },
+      });
+      const html = response.data;
+      const cheerio = require("cheerio");
+      const $ = cheerio.load(html);
+
+      // On the first page, extract the collection name for the subfolder.
+      if (isFirstPage) {
+        const collectionTitle =
+          $("h1.tag_title span.search_key").first().text().trim() ||
+          $("h1.tag_title").first().text().trim();
+        if (collectionTitle) {
+          // Clean up title like "Read all 1,075 crimson XXX Galleries"
+          collectionFolderName = sanitizeTitleForFilename(
+            collectionTitle
+              .replace(/Read all [\d,]+/, "")
+              .replace(/XXX Galleries/, "")
+              .trim()
+          );
+          log(`[HentaiEra] Determined collection folder: ${collectionFolderName}`);
+        } else {
+          log("[HentaiEra] Could not determine collection folder name.");
+        }
+        isFirstPage = false;
+      }
+
+      // Extract gallery links from the current page
+      $("div.thumb h2.gallery_title a").each((i, el) => {
+        const galleryPath = $(el).attr("href");
+        if (galleryPath) {
+          const fullUrl = new URL(galleryPath, baseUrl).href;
+          allGalleryLinks.add(fullUrl);
+        }
+      });
+
+      // Find the link to the next page
+      const nextLinkElement = $("ul.pagination a:contains('Next')");
+      if (
+        nextLinkElement.length > 0 &&
+        nextLinkElement.attr("href") &&
+        !nextLinkElement.parent().hasClass("disabled")
+      ) {
+        let nextPath = nextLinkElement.attr("href");
+        if (nextPath.startsWith("//")) {
+          nextUrl = "https:" + nextPath;
+        } else {
+          nextUrl = new URL(nextPath, baseUrl).href;
+        }
+      } else {
+        nextUrl = null; // No more pages
+      }
+      // Add a small delay to avoid getting blocked
+      if (nextUrl) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+    }
+
+    log(
+      `[HentaiEra] Found ${allGalleryLinks.size} unique galleries. Now scraping individual galleries...`
+    );
+
+    // Now scrape each gallery found
+    const galleryUrls = Array.from(allGalleryLinks);
+    for (let i = 0; i < galleryUrls.length; i++) {
+      const galleryUrl = galleryUrls[i];
+      if (isCancelled) {
+        log(`[HentaiEra] Gallery scraping cancelled.`);
+        break;
+      }
+      log(
+        `[HentaiEra] Scraping gallery ${i + 1} of ${
+          galleryUrls.length
+        }: ${galleryUrl}`
+      );
+      const galleryJobs = await scrapeHentaiEraGallery(galleryUrl, log);
+
+      // Prepend the collection folder to the series folder for each job
+      if (collectionFolderName && galleryJobs.length > 0) {
+        galleryJobs.forEach((job) => {
+          if (job.seriesFolder) {
+            job.seriesFolder = path.join(collectionFolderName, job.seriesFolder);
+          }
+        });
+      }
+
+      allDownloadJobs.push(...galleryJobs);
+    }
+
+    return allDownloadJobs;
+  } catch (error) {
+    log(
+      `[HentaiEra] Failed to scrape collection ${collectionUrl}: ${error.message}`
+    );
     return [];
   }
 }
