@@ -452,7 +452,8 @@ async function runDownloader(options, log) {
   // --- Producer-Consumer Setup ---
   const downloadQueue = [];
   let activeDownloadsCount = 0;
-  const activeDomains = new Set();
+  // Track active download counts per domain
+  const activeDomainCounts = {};
   let totalLinksFound = 0;
   let completedLinks = 0;
 
@@ -499,15 +500,25 @@ async function runDownloader(options, log) {
       let jobToDownload = null;
       let jobIndex = -1;
 
-      // Find an available job in the queue that doesn't conflict with active domains
+      // Find an available job in the queue that does not exceed per-domain concurrency
       for (let i = 0; i < downloadQueue.length; i++) {
         const job = downloadQueue[i];
         const domain = job.domain || "other";
-        // Allow multiple concurrent downloads for image files, especially from motherless.com
         const isImageDownload = job.link.type === "image";
         const isMotherlessDomain = domain.includes("motherless.com");
-        
-        if (!activeDomains.has(domain) || (isImageDownload && isMotherlessDomain)) {
+
+        // Determine max allowed for this domain
+        const maxForDomain =
+          MAX_DOWNLOADS_PER_DOMAIN[domain] ??
+          MAX_DOWNLOADS_PER_DOMAIN["default"] ??
+          1;
+        const currentForDomain = activeDomainCounts[domain] || 0;
+
+        // Allow multiple concurrent downloads for images from motherless.com (legacy logic)
+        if (
+          (isImageDownload && isMotherlessDomain) ||
+          currentForDomain < maxForDomain
+        ) {
           jobToDownload = job;
           jobIndex = i;
           break;
@@ -519,7 +530,8 @@ async function runDownloader(options, log) {
         downloadQueue.splice(jobIndex, 1);
         activeDownloadsCount++;
         const domain = jobToDownload.domain || "other";
-        activeDomains.add(domain);
+        // Increment active count for this domain
+        activeDomainCounts[domain] = (activeDomainCounts[domain] || 0) + 1;
 
         // --- Start the actual download ---
         let success = false;
@@ -565,7 +577,12 @@ async function runDownloader(options, log) {
         // --- Download finished ---
 
         activeDownloadsCount--;
-        activeDomains.delete(domain);
+        // Decrement active count for this domain
+        if (activeDomainCounts[domain]) {
+          activeDomainCounts[domain]--;
+          if (activeDomainCounts[domain] <= 0)
+            delete activeDomainCounts[domain];
+        }
         completedLinks++;
 
         // Update progress for the specific job
@@ -594,12 +611,14 @@ async function runDownloader(options, log) {
 
     const { url: jobUrl, type, domain } = job;
     let subredditDir;
-    
+
     if (type === "reddit") {
       // For Reddit: reddit.com/subreddit_name/ (subfolders for images/videos created later)
       const subredditName = extractName(jobUrl);
       if (!subredditName) {
-        log(`[ERROR] Invalid Reddit URL, cannot determine subreddit name: ${jobUrl}`);
+        log(
+          `[ERROR] Invalid Reddit URL, cannot determine subreddit name: ${jobUrl}`
+        );
         subredditDir = path.join(downloadPath, "reddit.com", "invalid_url");
       } else {
         subredditDir = path.join(downloadPath, "reddit.com", subredditName);
@@ -612,10 +631,15 @@ async function runDownloader(options, log) {
       }
       subredditDir = path.join(downloadPath, folderName);
     }
-    
+
     await fsp.mkdir(subredditDir, { recursive: true });
 
-    const displayName = type === "reddit" ? extractName(jobUrl) || "invalid_url" : (domain === MOTHERLESS_HOST ? MOTHERLESS_HOST : domain || "other");
+    const displayName =
+      type === "reddit"
+        ? extractName(jobUrl) || "invalid_url"
+        : domain === MOTHERLESS_HOST
+        ? MOTHERLESS_HOST
+        : domain || "other";
     log(`[INFO] [${displayName}] Starting scan...`);
     try {
       const links = await fetchAllMediaLinks(
@@ -2076,12 +2100,12 @@ async function downloadWithYtDlp(
       } else {
         dirToCheck = outputDir;
       }
-      
+
       // Always ensure the directory exists
       if (!fs.existsSync(dirToCheck)) {
         fs.mkdirSync(dirToCheck, { recursive: true });
       }
-      
+
       const filesInDir = fs.readdirSync(dirToCheck);
       const baseName = `${sanitizedTitle}_${postId}`;
       const fileExists = filesInDir.some(
@@ -2186,7 +2210,7 @@ async function downloadFile(
   const urlObj = new URL(url);
   let extension = path.extname(urlObj.pathname);
   if (!extension) extension = ".jpg";
-  
+
   // For gallery images, postId contains the unique identifier (e.g., "postId_0", "postId_1")
   // For regular images, postId is just the post ID
   // Always include the postId to ensure unique filenames for gallery images
@@ -2198,18 +2222,20 @@ async function downloadFile(
     finalOutputDir = path.join(outputDir, seriesFolder);
   } else if (outputDir.includes(path.join("reddit.com"))) {
     // For Reddit downloads, organize by file type
-    const mediaType = extension.match(/\.(mp4|webm|mov|avi|mkv)$/i) ? "videos" : "images";
+    const mediaType = extension.match(/\.(mp4|webm|mov|avi|mkv)$/i)
+      ? "videos"
+      : "images";
     finalOutputDir = path.join(outputDir, mediaType);
   } else {
     finalOutputDir = outputDir;
   }
-  
+
   const outputPath = path.join(finalOutputDir, fileName);
 
   try {
     // Always ensure the final output directory exists
     await fsp.mkdir(finalOutputDir, { recursive: true });
-    
+
     if (fs.existsSync(outputPath)) {
       log(`[INFO] Skipping duplicate (axios): ${fileName}`);
       return true; // Treat as success for progress tracking
@@ -2330,16 +2356,25 @@ function extractName(url) {
 }
 
 // --- Configurable max simultaneous downloads ---
-const MAX_SIMULTANEOUS_DOWNLOADS = 10; // Change this value to adjust the cap
+const MAX_SIMULTANEOUS_DOWNLOADS = 20; // Change this value to adjust the cap
 
 // --- Configurable yt-dlp concurrent fragments ---
-const YTDLP_CONCURRENT_FRAGMENTS = 4; // Change this value to adjust fragment concurrency (1-16 recommended)
+const YTDLP_CONCURRENT_FRAGMENTS = 8; // Change this value to adjust fragment concurrency (1-16 recommended)
 
 // --- Configurable multi-threaded download settings ---
 const MULTI_THREAD_CHUNK_SIZE = 1024 * 1024; // 1MB chunks
 const MULTI_THREAD_CONNECTIONS = 20; // Number of concurrent connections per file
 
 // --- Sites that benefit from yt-dlp extraction + multi-threaded download ---
+
+// --- Configurable max simultaneous downloads per domain ---
+const MAX_DOWNLOADS_PER_DOMAIN = {
+  "motherless.com": 2,
+  "reddit.com": 10,
+  "heavy-r.com": 1,
+  "crazyshit.com": 10,
+  default: 1, // fallback for all other domains
+};
 
 // --- yt-dlp URL extractor for multi-threaded downloading ---
 async function extractVideoUrlWithYtDlp(pageUrl, log, postId, postTitle) {
