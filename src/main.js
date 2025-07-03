@@ -298,7 +298,7 @@ ipcMain.on("stop-download", () => {
 ipcMain.on("skip-subreddit", () => {
   isSkipping = true;
 });
-ipcMain.handle("getYtDlpWhitelist", () => YT_DLP_HOSTS);
+ipcMain.handle("getYtDlpWhitelist", () => YTDLP_SUPPORTED_HOSTS);
 
 // Download queue management functions
 function addToDownloadQueue(url, title, id) {
@@ -891,7 +891,7 @@ async function fetchAllMediaLinks(
   if (options.type === "ytdlp" && options.domain) {
     const domain = options.domain;
     // --- Bypass logic for specific hosts ---
-    if (BYPASS_YTDLP_HOSTS.some((host) => domain.includes(host))) {
+    if (FORCE_YTDLP_ONLY_HOSTS.some((host) => domain.includes(host))) {
       log(
         `[INFO] Bypassing multi-thread for ${domain}, using yt-dlp directly.`
       );
@@ -906,7 +906,7 @@ async function fetchAllMediaLinks(
       ];
     }
     // Check if this is a site that benefits from yt-dlp extraction + multi-threaded download
-    if (YTDLP_EXTRACT_HOSTS.some((host) => domain.includes(host))) {
+    if (HYBRID_EXTRACTION_HOSTS.some((host) => domain.includes(host))) {
       log(`[INFO] Using hybrid extraction for ${domain}`);
       // Use yt-dlp for URL extraction, then multi-threaded download
       const extractedInfo = await extractVideoUrlWithYtDlp(
@@ -1961,7 +1961,7 @@ async function extractMediaUrlsFromPost(
           title: postTitle,
         });
       }
-    } else if (BYPASS_YTDLP_HOSTS.some((host) => domain.includes(host))) {
+    } else if (FORCE_YTDLP_ONLY_HOSTS.some((host) => domain.includes(host))) {
       // Force yt-dlp for bypass hosts
       urls.push({
         url: postUrl,
@@ -1970,7 +1970,7 @@ async function extractMediaUrlsFromPost(
         id: postId,
         title: postTitle,
       });
-    } else if (YTDLP_EXTRACT_HOSTS.some((host) => domain.includes(host))) {
+    } else if (HYBRID_EXTRACTION_HOSTS.some((host) => domain.includes(host))) {
       // Use yt-dlp for URL extraction, then multi-threaded download
       const extractedInfo = await extractVideoUrlWithYtDlp(
         postUrl,
@@ -2000,7 +2000,7 @@ async function extractMediaUrlsFromPost(
       // --- crazyshit.com series page: skip direct yt-dlp, let fetchAllMediaLinks handle ---
       if (domain.includes("crazyshit.com") && /\/series\//i.test(postUrl)) {
         // Do not push, let fetchAllMediaLinks handle series
-      } else if (YT_DLP_HOSTS.some((host) => domain.includes(host))) {
+      } else if (YTDLP_SUPPORTED_HOSTS.some((host) => domain.includes(host))) {
         urls.push({
           url: postUrl,
           type: "video",
@@ -2307,9 +2307,9 @@ function extractName(url) {
 // --- Global settings moved to config/settings.js ---
 const MAX_SIMULTANEOUS_DOWNLOADS = settings.MAX_SIMULTANEOUS_DOWNLOADS;
 const MAX_DOWNLOADS_PER_DOMAIN = settings.MAX_DOWNLOADS_PER_DOMAIN;
-const YTDLP_EXTRACT_HOSTS = settings.YTDLP_EXTRACT_HOSTS;
-const YT_DLP_HOSTS = settings.YT_DLP_HOSTS;
-const BYPASS_YTDLP_HOSTS = settings.BYPASS_YTDLP_HOSTS;
+const HYBRID_EXTRACTION_HOSTS = settings.HYBRID_EXTRACTION_HOSTS;
+const YTDLP_SUPPORTED_HOSTS = settings.YTDLP_SUPPORTED_HOSTS;
+const FORCE_YTDLP_ONLY_HOSTS = settings.FORCE_YTDLP_ONLY_HOSTS;
 const IMAGE_GALLERY_HOSTS = settings.IMAGE_GALLERY_HOSTS;
 const MOTHERLESS_HOST = settings.MOTHERLESS_HOST;
 const YTDLP_CONCURRENT_FRAGMENTS = settings.YTDLP_CONCURRENT_FRAGMENTS;

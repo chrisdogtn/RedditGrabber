@@ -10,8 +10,6 @@
   --font-family: "Inter", sans-serif;
 }
 
-
-
 body {
   font-family: var(--font-family);
   background-color: var(--color-background);
@@ -86,15 +84,19 @@ h3 {
 }
 
 .loading-text {
-	background: linear-gradient(90deg, #00f, #0ff, #00f) -100%/ 200%;
-	-webkit-background-clip: text;
-	        background-clip: text;
-	color: transparent;
-	animation: shimmer 2s linear infinite;
-  	font: 900 2em exo, sans-serif;
+  background: linear-gradient(90deg, #00f, #0ff, #00f) -100%/ 200%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer 2s linear infinite;
+  font: 900 1.2em exo, sans-serif;
 }
 
-@keyframes shimmer { to { background-position: 100% } }
+@keyframes shimmer {
+  to {
+    background-position: 100%;
+  }
+}
 
 .app-tagline {
   color: var(--color-text-secondary);
@@ -434,7 +436,6 @@ button.danger:hover {
   line-height: 1.6;
   padding: 8px 16px;
   max-height: 52vh;
-
 }
 #downloads-log-area {
   flex-grow: 1;
@@ -443,12 +444,10 @@ button.danger:hover {
   line-height: 1.6;
   padding: 8px 16px;
   max-height: 52vh;
-
 }
 
 .log-section {
   width: 50%;
-  
 }
 
 .log-sections {

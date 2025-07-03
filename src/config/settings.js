@@ -7,11 +7,20 @@ const MAX_DOWNLOADS_PER_DOMAIN = {
   "reddit.com": 10,
   "heavy-r.com": 1,
   "crazyshit.com": 10,
+  "hentaiera.com": 8,
+  "thisvid.com": 5,
+  "xhamster.com": 5,
+  "cuteboytube.com": 5,
+  "boy18tube.com": 5,
+  "qosvideos.com": 5,
+  "pmvhaven.com": 5,
+  "efukt.com": 5,
+  "pervertium.com": 5,
   default: 1, // fallback for all other domains
 };
 
-// --- yt-dlp and multi-thread extraction hosts ---
-const YTDLP_EXTRACT_HOSTS = [
+// --- Hybrid extraction hosts (yt-dlp for extraction, multi-thread for download) ---
+const HYBRID_EXTRACTION_HOSTS = [
   "thisvid.com",
   "xhamster.com",
   "pornhub.com",
@@ -28,9 +37,12 @@ const YTDLP_EXTRACT_HOSTS = [
   "heavy-r.com",
   "crazyshit.com",
   "motherless.com",
+  "qosvideos.com",
+  "pmvhaven.com",
 ];
 
-const YT_DLP_HOSTS = [
+// --- main whitelist ---
+const YTDLP_SUPPORTED_HOSTS = [
   "youtube.com",
   "youtu.be",
   "x.com",
@@ -59,8 +71,12 @@ const YT_DLP_HOSTS = [
   "motherless.com",
 ];
 
-// --- Hosts to bypass multi-thread downloader and use yt-dlp directly ---
-const BYPASS_YTDLP_HOSTS = ["pornpawg.com", "boy18tube.com", "motherless.com"];
+// --- Hosts that should always use yt-dlp (never multi-thread) ---
+const FORCE_YTDLP_ONLY_HOSTS = [
+  "pornpawg.com",
+  "boy18tube.com",
+  "motherless.com",
+];
 
 // --- Hosts that require special image gallery scraping ---
 const IMAGE_GALLERY_HOSTS = ["hentaiera.com"];
@@ -76,9 +92,9 @@ const MULTI_THREAD_CONNECTIONS = 20;
 module.exports = {
   MAX_SIMULTANEOUS_DOWNLOADS,
   MAX_DOWNLOADS_PER_DOMAIN,
-  YTDLP_EXTRACT_HOSTS,
-  YT_DLP_HOSTS,
-  BYPASS_YTDLP_HOSTS,
+  HYBRID_EXTRACTION_HOSTS,
+  YTDLP_SUPPORTED_HOSTS,
+  FORCE_YTDLP_ONLY_HOSTS,
   IMAGE_GALLERY_HOSTS,
   MOTHERLESS_HOST,
   YTDLP_CONCURRENT_FRAGMENTS,
