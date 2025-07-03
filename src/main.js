@@ -6,6 +6,7 @@ const axios = require("axios");
 const { autoUpdater } = require("electron-updater");
 const { spawn } = require("child_process");
 const { scrapeMotherlessPage } = require("./motherless.js");
+const settings = require("./config/settings.js");
 
 let Store;
 let store;
@@ -19,60 +20,6 @@ let activeAxiosControllers = new Set();
 
 // Track active downloads for queue display
 let activeDownloads = [];
-
-const YTDLP_EXTRACT_HOSTS = [
-  "thisvid.com",
-  "xhamster.com",
-  "pornhub.com",
-  "xvideos.com",
-  "hypnotube.com",
-  "webmshare.com",
-  "ratedgross.com",
-  "pervertium.com",
-  "efukt.com",
-  "sissyhypno.com",
-  "boy18tube.com",
-  "cuteboytube.com",
-  "pornpawg.com",
-  "heavy-r.com",
-  "crazyshit.com",
-  "motherless.com",
-];
-const YT_DLP_HOSTS = [
-  "youtube.com",
-  "youtu.be",
-  "x.com",
-  "facebook.com",
-  "twitch.tv",
-  "instagram.com",
-  "xhamster.com",
-  "pornhub.com",
-  "hypnotube.com",
-  "xvideos.com",
-  "twitter.com",
-  "thisvid.com",
-  "webmshare.com",
-  "pmvhaven.com",
-  "ratedgross.com",
-  "pervertium.com",
-  "crazyshit.com",
-  "efukt.com",
-  "sissyhypno.com",
-  "boy18tube.com",
-  "cuteboytube.com",
-  "pornpawg.com",
-  "qosvideos.com",
-  "heavy-r.com",
-  "hentaiera.com",
-  "motherless.com",
-];
-
-// --- Hosts to bypass multi-thread downloader and use yt-dlp directly ---
-const BYPASS_YTDLP_HOSTS = ["pornpawg.com", "boy18tube.com", "motherless.com"];
-
-// --- Hosts that require special image gallery scraping ---
-const IMAGE_GALLERY_HOSTS = ["hentaiera.com"];
-const MOTHERLESS_HOST = "motherless.com";
 
 function appLog(message) {
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -2356,25 +2303,18 @@ function extractName(url) {
 }
 
 // --- Configurable max simultaneous downloads ---
-const MAX_SIMULTANEOUS_DOWNLOADS = 20; // Change this value to adjust the cap
 
-// --- Configurable yt-dlp concurrent fragments ---
-const YTDLP_CONCURRENT_FRAGMENTS = 8; // Change this value to adjust fragment concurrency (1-16 recommended)
-
-// --- Configurable multi-threaded download settings ---
-const MULTI_THREAD_CHUNK_SIZE = 1024 * 1024; // 1MB chunks
-const MULTI_THREAD_CONNECTIONS = 20; // Number of concurrent connections per file
-
-// --- Sites that benefit from yt-dlp extraction + multi-threaded download ---
-
-// --- Configurable max simultaneous downloads per domain ---
-const MAX_DOWNLOADS_PER_DOMAIN = {
-  "motherless.com": 2,
-  "reddit.com": 10,
-  "heavy-r.com": 1,
-  "crazyshit.com": 10,
-  default: 1, // fallback for all other domains
-};
+// --- Global settings moved to config/settings.js ---
+const MAX_SIMULTANEOUS_DOWNLOADS = settings.MAX_SIMULTANEOUS_DOWNLOADS;
+const MAX_DOWNLOADS_PER_DOMAIN = settings.MAX_DOWNLOADS_PER_DOMAIN;
+const YTDLP_EXTRACT_HOSTS = settings.YTDLP_EXTRACT_HOSTS;
+const YT_DLP_HOSTS = settings.YT_DLP_HOSTS;
+const BYPASS_YTDLP_HOSTS = settings.BYPASS_YTDLP_HOSTS;
+const IMAGE_GALLERY_HOSTS = settings.IMAGE_GALLERY_HOSTS;
+const MOTHERLESS_HOST = settings.MOTHERLESS_HOST;
+const YTDLP_CONCURRENT_FRAGMENTS = settings.YTDLP_CONCURRENT_FRAGMENTS;
+const MULTI_THREAD_CHUNK_SIZE = settings.MULTI_THREAD_CHUNK_SIZE;
+const MULTI_THREAD_CONNECTIONS = settings.MULTI_THREAD_CONNECTIONS;
 
 // --- yt-dlp URL extractor for multi-threaded downloading ---
 async function extractVideoUrlWithYtDlp(pageUrl, log, postId, postTitle) {
