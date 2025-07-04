@@ -1,3 +1,92 @@
+// --- womennaked.net gallery scraper ---
+async function scrapeWomennakedGallery(galleryUrl, log) {
+  try {
+    log(`[WMN] Scraping gallery: ${galleryUrl}`);
+    const axiosOptions = { headers: { "User-Agent": BROWSER_USER_AGENT } };
+    const response = await axios.get(galleryUrl, axiosOptions);
+    const html = response.data;
+    const cheerio = require("cheerio");
+    const $ = cheerio.load(html);
+    // Find all <li class="box"> elements with <a class="wmn-pop" href=...>
+    const links = [];
+    const baseUrl = new URL(galleryUrl).origin;
+    const items = $("li.box a.wmn-pop");
+    for (let i = 0; i < items.length; i++) {
+      const a = items.eq(i);
+      let href = a.attr("href");
+      if (!href) continue;
+      // Build absolute URL for the get.php page
+      if (href.startsWith("/")) href = baseUrl + href;
+      else if (!href.startsWith("http")) href = baseUrl + "/" + href;
+      links.push(href);
+    }
+    log(`[WMN] Found ${links.length} image detail pages.`);
+
+    // --- Extract category name from URL for subfoldering ---
+    let categoryFolder = null;
+    try {
+      const match = galleryUrl.match(/womennaked\.net\/category\/([^\/]+)/i);
+      if (match && match[1]) {
+        categoryFolder = decodeURIComponent(match[1]);
+      }
+    } catch {}
+
+    // Now fetch all image detail pages in parallel (limit concurrency for efficiency)
+    const MAX_CONCURRENT = 8;
+    const results = [];
+    let idx = 0;
+    let lastLogTime = Date.now();
+    async function worker() {
+      while (idx < links.length) {
+        const myIdx = idx++;
+        const url = links[myIdx];
+        try {
+          // Progress log every 10 images or every 2 seconds
+          if (myIdx % 20 === 0 || Date.now() - lastLogTime > 2000) {
+            log(
+              `[INFO] Fetching detail page ${myIdx + 1} of ${links.length}...`
+            );
+            lastLogTime = Date.now();
+          }
+          const resp = await axios.get(url, axiosOptions);
+          const $detail = cheerio.load(resp.data);
+          // Find <a data-fancybox="image" href=...><img src=...></a>
+          const imgA = $detail('a[data-fancybox="image"]');
+          if (imgA.length) {
+            const imgUrl = imgA.attr("href") || imgA.find("img").attr("src");
+            const title =
+              imgA.attr("title") ||
+              imgA.find("img").attr("alt") ||
+              "womennaked_image";
+            if (imgUrl) {
+              results.push({
+                url: imgUrl,
+                type: "image",
+                downloader: "axios", // single-threaded download for womennaked.net
+                id: Date.now().toString() + "_" + myIdx,
+                title,
+                domain: "womennaked.net",
+                ...(categoryFolder ? { seriesFolder: categoryFolder } : {}),
+              });
+            }
+          }
+        } catch (e) {
+          log(`[WMN] Failed to fetch detail page: ${url} - ${e.message}`);
+        }
+      }
+    }
+    // Start workers
+    const workers = [];
+    for (let i = 0; i < Math.min(MAX_CONCURRENT, links.length); i++)
+      workers.push(worker());
+    await Promise.all(workers);
+    log(`[WMN] Scraping complete. Found ${results.length} images.`);
+    return results;
+  } catch (error) {
+    log(`[WMN] Error scraping gallery: ${error.message}`);
+    return [];
+  }
+}
 // --- spankbang.com video extractor (BrowserWindow) ---
 async function extractSpankbangVideoUrl(pageUrl, log) {
   try {
@@ -58,18 +147,24 @@ async function extractSpankbangVideoUrl(pageUrl, log) {
       win.on("closed", () => {
         if (!finished) {
           finished = true;
-          reject(new Error("BrowserWindow closed before HTML could be retrieved"));
+          reject(
+            new Error("BrowserWindow closed before HTML could be retrieved")
+          );
         }
       });
       win.on("crashed", () => {
         if (!finished) {
           finished = true;
-          reject(new Error("BrowserWindow crashed before HTML could be retrieved"));
+          reject(
+            new Error("BrowserWindow crashed before HTML could be retrieved")
+          );
         }
       });
     });
     // Look for the <script> tag containing stream_data
-    const scriptMatch = html.match(/<script[^>]*>[^<]*var\s+stream_data\s*=\s*({[\s\S]*?});/);
+    const scriptMatch = html.match(
+      /<script[^>]*>[^<]*var\s+stream_data\s*=\s*({[\s\S]*?});/
+    );
     if (!scriptMatch || !scriptMatch[1]) {
       log(`[SPANKBANG] Could not find stream_data in HTML.`);
       return null;
@@ -79,8 +174,8 @@ async function extractSpankbangVideoUrl(pageUrl, log) {
       // Replace single quotes with double quotes for JSON parsing, but only for keys/values
       let jsonStr = scriptMatch[1]
         .replace(/'/g, '"')
-        .replace(/,\s*}/g, '}') // Remove trailing commas
-        .replace(/,\s*]/g, ']');
+        .replace(/,\s*}/g, "}") // Remove trailing commas
+        .replace(/,\s*]/g, "]");
       streamData = JSON.parse(jsonStr);
     } catch (e) {
       log(`[SPANKBANG] Failed to parse stream_data: ${e.message}`);
@@ -1089,6 +1184,18 @@ async function fetchAllMediaLinks(
     const ashemaletubeMatch = subredditUrl.match(
       /^https?:\/\/(?:www\.)?ashemaletube\.com\/videos\//i
     );
+
+    // --- womennaked.net gallery logic ---
+    const womennakedMatch = subredditUrl.match(
+      /^https?:\/\/(?:www\.)?womennaked\.net\//i
+    );
+    if (womennakedMatch) {
+      log(`[INFO] Detected womennaked.net gallery page.`);
+      const links = await scrapeWomennakedGallery(subredditUrl, log);
+      log(`[INFO] [womennaked.net] Found ${links.length} images.`);
+      log(`[INFO] [womennaked.net] Scan complete.`);
+      return links;
+    }
 
     // --- spankbang.com video page logic ---
     log(`[DEBUG] fetchAllMediaLinks called with URL: ${subredditUrl}`);

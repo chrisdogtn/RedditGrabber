@@ -74,6 +74,7 @@ const YTDLP_SUPPORTED_HOSTS = [
   "ashemaletube.com",
   "luxuretv.com",
   "spankbang.com",
+  "womennaked.net"
 ];
 
 // --- Hosts that should always use yt-dlp (never multi-thread) ---
