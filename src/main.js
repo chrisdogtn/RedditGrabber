@@ -1,3 +1,240 @@
+// --- luxuretv.com video extractor ---
+async function extractLuxuretvVideoUrl(pageUrl, log) {
+  try {
+    log(`[LUXURETV] Extracting direct video URL from: ${pageUrl}`);
+    // Use Electron headless browser to fetch HTML (bypass anti-bot)
+    const html = await new Promise((resolve, reject) => {
+      let win = new BrowserWindow({
+        show: false,
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true,
+        },
+      });
+      let finished = false;
+      win.webContents.setUserAgent(BROWSER_USER_AGENT);
+      win.webContents.session.setCertificateVerifyProc((request, callback) => {
+        callback(0);
+      });
+      win.loadURL(pageUrl);
+      win.webContents.on("did-finish-load", async () => {
+        if (finished) return;
+        try {
+          // Wait for the video element to appear (max 3s)
+          const pollForVideo = async () => {
+            const maxAttempts = 30;
+            let attempt = 0;
+            while (attempt < maxAttempts) {
+              const html = await win.webContents.executeJavaScript(
+                "document.documentElement.outerHTML"
+              );
+              if (html.includes('id="thisPlayer_html5_api"')) return html;
+              await new Promise((r) => setTimeout(r, 100));
+              attempt++;
+            }
+            return await win.webContents.executeJavaScript(
+              "document.documentElement.outerHTML"
+            );
+          };
+          const html = await pollForVideo();
+          finished = true;
+          win.destroy();
+          resolve(html);
+        } catch (e) {
+          if (!finished) {
+            finished = true;
+            win.destroy();
+            reject(e);
+          }
+        }
+      });
+      win.on("unresponsive", () => {
+        if (!finished) {
+          finished = true;
+          win.destroy();
+          reject(new Error("BrowserWindow became unresponsive"));
+        }
+      });
+      win.on("closed", () => {
+        if (!finished) {
+          finished = true;
+          reject(
+            new Error("BrowserWindow closed before HTML could be retrieved")
+          );
+        }
+      });
+      win.on("crashed", () => {
+        if (!finished) {
+          finished = true;
+          reject(
+            new Error("BrowserWindow crashed before HTML could be retrieved")
+          );
+        }
+      });
+    });
+    // Use cheerio to parse the HTML
+    const cheerio = require("cheerio");
+    const $ = cheerio.load(html);
+    // Look for <video id="thisPlayer_html5_api"> and its <source src=...>
+    let videoSource = null;
+    const video = $("#thisPlayer_html5_api");
+    if (video.length) {
+      // Try to get the first <source> child with type="video/mp4"
+      videoSource = video.find('source[type="video/mp4"]').attr("src");
+      // Fallback: try src attribute directly on <video>
+      if (!videoSource) {
+        videoSource = video.attr("src");
+      }
+    }
+    if (!videoSource) {
+      // Fallback: try to find any <source src=...mp4>
+      videoSource = $('source[type="video/mp4"]').attr("src");
+    }
+    if (!videoSource) {
+      log(`[LUXURETV] No video source found in HTML.`);
+      return null;
+    }
+    // Extract title from <title>
+    let title = ($("title").text() || "").trim();
+    if (!title) title = "luxuretv_video";
+    log(`[LUXURETV] Extracted source URL: ${videoSource}`);
+    return {
+      url: videoSource,
+      title,
+      supportsRangeRequests: true,
+    };
+  } catch (error) {
+    log(`[LUXURETV] Error extracting video: ${error.message}`);
+    return null;
+  }
+}
+// --- ashemaletube.com video extractor ---
+async function extractAshemaletubeVideoUrl(pageUrl, log) {
+  try {
+    log(`[ASHEMALETUBE] Extracting direct video URL from: ${pageUrl}`);
+    // Always use Electron headless browser to get HTML after Cloudflare/JS
+    let html = await new Promise((resolve, reject) => {
+      let win = new BrowserWindow({
+        show: false,
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true,
+        },
+      });
+      let finished = false;
+      win.webContents.setUserAgent(BROWSER_USER_AGENT);
+      win.webContents.session.setCertificateVerifyProc((request, callback) => {
+        callback(0);
+      });
+      win.loadURL(pageUrl);
+      win.webContents.on("did-finish-load", async () => {
+        if (finished) return;
+        try {
+          // Wait for sources array to appear in the DOM (max 3s)
+          const pollForSources = async () => {
+            const maxAttempts = 30;
+            let attempt = 0;
+            while (attempt < maxAttempts) {
+              const html = await win.webContents.executeJavaScript(
+                "document.documentElement.outerHTML"
+              );
+              if (/var\\s+sources\\s*=\\s*\[/.test(html)) return html;
+              await new Promise((r) => setTimeout(r, 100));
+              attempt++;
+            }
+            return await win.webContents.executeJavaScript(
+              "document.documentElement.outerHTML"
+            );
+          };
+          const html = await pollForSources();
+          finished = true;
+          win.destroy();
+          resolve(html);
+        } catch (e) {
+          if (!finished) {
+            finished = true;
+            win.destroy();
+            reject(e);
+          }
+        }
+      });
+      win.on("unresponsive", () => {
+        if (!finished) {
+          finished = true;
+          win.destroy();
+          reject(new Error("BrowserWindow became unresponsive"));
+        }
+      });
+      win.on("closed", () => {
+        if (!finished) {
+          finished = true;
+          reject(
+            new Error("BrowserWindow closed before HTML could be retrieved")
+          );
+        }
+      });
+      win.on("crashed", () => {
+        if (!finished) {
+          finished = true;
+          reject(
+            new Error("BrowserWindow crashed before HTML could be retrieved")
+          );
+        }
+      });
+    });
+    let usedBrowser = true;
+    // Find the sources array in the script tag (robust extraction)
+    const sourcesVarMatch = html.match(/var\s+sources\s*=\s*(\[.*?\]);/s);
+    if (!sourcesVarMatch || !sourcesVarMatch[1]) {
+      log(
+        `[ASHEMALETUBE] No sources array found in page` +
+          (usedBrowser ? " (browser fallback)" : "")
+      );
+      return null;
+    }
+    let sourcesArr;
+    try {
+      // Unescape and parse JSON array
+      let sourcesJson = sourcesVarMatch[1]
+        .replace(/\\(["'])/g, "$1") // unescape quotes
+        .replace(/\n|\r/g, ""); // remove newlines
+      sourcesArr = JSON.parse(sourcesJson);
+    } catch (e) {
+      log(`[ASHEMALETUBE] Failed to parse sources array: ${e.message}`);
+      return null;
+    }
+    // Always select the first object in the sources array
+    let bestSource = null;
+    if (Array.isArray(sourcesArr) && sourcesArr.length > 0) {
+      bestSource = sourcesArr[0];
+    }
+    if (
+      !bestSource ||
+      typeof bestSource.src !== "string" ||
+      !bestSource.src.startsWith("https://cdn.ashemaletube.com/") ||
+      !bestSource.src.endsWith(".mp4")
+    ) {
+      log(`[ASHEMALETUBE] No valid video source found in first array item`);
+      return null;
+    }
+    //
+    log(`[ASHEMALETUBE] Extracted source URL: ${bestSource.src}`);
+    // Extract title from <title>
+    let title = null;
+    const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+    if (titleMatch && titleMatch[1]) {
+      title = titleMatch[1].replace(/\s*-\s*AShemaleTube.*$/, "").trim();
+    }
+    return {
+      url: bestSource.src,
+      title: title || "ashemaletube_video",
+      supportsRangeRequests: true,
+    };
+  } catch (error) {
+    log(`[ASHEMALETUBE] Error extracting video: ${error.message}`);
+    return null;
+  }
+}
 const { app, BrowserWindow, ipcMain, dialog, Menu } = require("electron");
 const fs = require("fs");
 const path = require("path");
@@ -25,6 +262,12 @@ function appLog(message) {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send("log-update", message);
   }
+  // Remove debug logs from production
+  if (
+    typeof message === "string" &&
+    (message.includes("[DEBUG]") || message.includes("[QUEUE-DEBUG]"))
+  )
+    return;
   console.log(message);
 }
 function getYtDlpPath() {
@@ -94,7 +337,6 @@ if (isDev) {
       {
         label: "Trigger Mock Update Available",
         click: () => {
-          appLog("[DEBUG] Mock update available event triggered.");
           if (mainWindow) {
             mainWindow.webContents.send("update-notification", {
               message: "[MOCK] App update available. Downloading...",
@@ -106,7 +348,6 @@ if (isDev) {
       {
         label: "Trigger Mock Update Download Progress",
         click: () => {
-          appLog("[DEBUG] Mock update download progress event triggered.");
           let percent = 0;
           const interval = setInterval(() => {
             percent += 10;
@@ -315,6 +556,7 @@ function addToDownloadQueue(url, title, id) {
     startTime: Date.now(),
     progress: 0,
   };
+  //
   activeDownloads.push(downloadItem);
   notifyDownloadQueueUpdated();
   return downloadItem.id;
@@ -450,16 +692,28 @@ async function runDownloader(options, log) {
       // Find an available job in the queue that does not exceed per-domain concurrency
       for (let i = 0; i < downloadQueue.length; i++) {
         const job = downloadQueue[i];
-        const domain = job.domain || "other";
+        let domain = job.domain || "other";
         const isImageDownload = job.link.type === "image";
         const isMotherlessDomain = domain.includes("motherless.com");
 
+        // --- Wildcard domain normalization ---
+        // If the domain is a subdomain, try to match against any base domain in MAX_DOWNLOADS_PER_DOMAIN
+        let normalizedDomain = domain;
+        for (const baseDomain in MAX_DOWNLOADS_PER_DOMAIN) {
+          if (baseDomain !== "default" && domain.endsWith(`.${baseDomain}`)) {
+            normalizedDomain = baseDomain;
+            break;
+          }
+        }
+
         // Determine max allowed for this domain
         const maxForDomain =
-          MAX_DOWNLOADS_PER_DOMAIN[domain] ??
+          MAX_DOWNLOADS_PER_DOMAIN[normalizedDomain] ??
           MAX_DOWNLOADS_PER_DOMAIN["default"] ??
           1;
-        const currentForDomain = activeDomainCounts[domain] || 0;
+        const currentForDomain = activeDomainCounts[normalizedDomain] || 0;
+
+        //
 
         // Allow multiple concurrent downloads for images from motherless.com (legacy logic)
         if (
@@ -468,6 +722,7 @@ async function runDownloader(options, log) {
         ) {
           jobToDownload = job;
           jobIndex = i;
+          job._normalizedDomain = normalizedDomain; // Save for later decrement
           break;
         }
       }
@@ -477,8 +732,10 @@ async function runDownloader(options, log) {
         downloadQueue.splice(jobIndex, 1);
         activeDownloadsCount++;
         const domain = jobToDownload.domain || "other";
+        const normalizedDomain = jobToDownload._normalizedDomain || domain;
         // Increment active count for this domain
-        activeDomainCounts[domain] = (activeDomainCounts[domain] || 0) + 1;
+        activeDomainCounts[normalizedDomain] =
+          (activeDomainCounts[normalizedDomain] || 0) + 1;
 
         // --- Start the actual download ---
         let success = false;
@@ -525,10 +782,32 @@ async function runDownloader(options, log) {
 
         activeDownloadsCount--;
         // Decrement active count for this domain
-        if (activeDomainCounts[domain]) {
-          activeDomainCounts[domain]--;
-          if (activeDomainCounts[domain] <= 0)
-            delete activeDomainCounts[domain];
+        if (activeDomainCounts[normalizedDomain]) {
+          activeDomainCounts[normalizedDomain]--;
+          if (activeDomainCounts[normalizedDomain] <= 0)
+            delete activeDomainCounts[normalizedDomain];
+        }
+        // --- Mark item as completed in the main queue (options.subreddits) ---
+        if (options && Array.isArray(options.subreddits)) {
+          // Try to match by URL or ID
+          const completedUrl =
+            jobToDownload.sourceUrl || jobToDownload.link.url;
+          for (const item of options.subreddits) {
+            if (
+              (item.url && item.url === completedUrl) ||
+              (item.id && item.id === jobToDownload.link.id)
+            ) {
+              item.status = "completed";
+              item.completedAt = Date.now();
+            }
+          }
+          // Notify renderer/UI if needed
+          if (mainWindow && !isCancelled) {
+            mainWindow.webContents.send(
+              "main-queue-updated",
+              options.subreddits
+            );
+          }
         }
         completedLinks++;
 
@@ -669,6 +948,10 @@ async function runDownloader(options, log) {
   while (activeDownloadsCount > 0 && !isCancelled) {
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
+  // Final main-queue-updated event to ensure UI is in sync
+  if (mainWindow && options && Array.isArray(options.subreddits)) {
+    mainWindow.webContents.send("main-queue-updated", options.subreddits);
+  }
 
   if (isCancelled) {
     log("--- DOWNLOADS CANCELLED BY USER ---");
@@ -690,6 +973,111 @@ async function fetchAllMediaLinks(
   log,
   unhandledLogPath
 ) {
+  // --- ashemaletube.com custom logic ---
+  try {
+    const ashemaletubeMatch = subredditUrl.match(
+      /^https?:\/\/(?:www\.)?ashemaletube\.com\/videos\//i
+    );
+
+    // --- luxuretv.com video page logic (support all /video/ and /videos/ URLs, any subdomain) ---
+    // Add debug log to see what URL is being passed
+    log(`[DEBUG] fetchAllMediaLinks called with URL: ${subredditUrl}`);
+    const luxuretvMatch = subredditUrl.match(
+      /^https?:\/\/(?:[a-zA-Z0-9-]+\.)*luxuretv\.com\/(video|videos)\//i
+    );
+    if (luxuretvMatch) {
+      // Normalize the URL to use base domain luxuretv.com
+      let urlObj;
+      try {
+        urlObj = new URL(subredditUrl);
+      } catch (e) {
+        log(`[LUXURETV] Invalid URL: ${subredditUrl}`);
+        return [];
+      }
+      urlObj.hostname = "luxuretv.com";
+      const normalizedUrl = urlObj.toString();
+      log(
+        `[INFO] Detected luxuretv.com video page (normalized to base domain).`
+      );
+      const videoInfo = await extractLuxuretvVideoUrl(normalizedUrl, log);
+      if (videoInfo && videoInfo.url) {
+        log(`[LUXURETV] Successfully extracted direct video URL.`);
+        log(`[INFO] [luxuretv.com] Found 1 potential file.`);
+        log(`[INFO] [luxuretv.com] Scan complete.`);
+        return [
+          {
+            url: videoInfo.url,
+            type: "video",
+            downloader: "multi-thread",
+            id: Date.now().toString(),
+            title: videoInfo.title,
+            domain: "luxuretv.com",
+          },
+        ];
+      } else {
+        log(`[LUXURETV] Could not extract video URL.`);
+        log(`[INFO] [luxuretv.com] Found 0 potential files.`);
+        log(`[INFO] [luxuretv.com] Scan complete.`);
+        return [];
+      }
+    }
+
+    if (ashemaletubeMatch) {
+      // Always extract the direct video URL with headless browser
+      const urlObject = new URL(subredditUrl);
+      const domain = urlObject.hostname.replace(/^www\./, "");
+      log(`[INFO] Detected ashemaletube.com video page.`);
+      const videoInfo = await extractAshemaletubeVideoUrl(subredditUrl, log);
+      if (
+        videoInfo &&
+        videoInfo.url &&
+        videoInfo.url.startsWith("https://cdn.ashemaletube.com/")
+      ) {
+        log(`[ASHEMALETUBE] Successfully extracted direct video URL.`);
+        log(`[INFO] [ashemaletube.com] Found 1 potential file.`);
+        log(`[INFO] [ashemaletube.com] Scan complete.`);
+        // If FORCE_YTDLP_ONLY_HOSTS includes the domain, use yt-dlp for download
+        if (
+          FORCE_YTDLP_ONLY_HOSTS &&
+          FORCE_YTDLP_ONLY_HOSTS.some((host) => domain.includes(host))
+        ) {
+          log(
+            `[INFO] ashemaletube.com is in FORCE_YTDLP_ONLY_HOSTS, passing extracted link to yt-dlp.`
+          );
+          return [
+            {
+              url: videoInfo.url,
+              type: "video",
+              downloader: "ytdlp",
+              id: Date.now().toString(),
+              title: videoInfo.title,
+            },
+          ];
+        } else {
+          // Otherwise, use multi-threaded downloader
+          return [
+            {
+              url: videoInfo.url,
+              type: "video",
+              downloader: "multi-thread",
+              id: Date.now().toString(),
+              title: videoInfo.title,
+            },
+          ];
+        }
+      } else {
+        log(`[ASHEMALETUBE] Could not extract video URL.`);
+        log(`[INFO] [ashemaletube.com] Found 0 potential files.`);
+        log(`[INFO] [ashemaletube.com] Scan complete.`);
+        return [];
+      }
+    }
+  } catch (e) {
+    log(`[ERROR] ashemaletube.com handler failed: ${e.message}`);
+    log(`[INFO] [ashemaletube.com] Found 0 potential files.`);
+    log(`[INFO] [ashemaletube.com] Scan complete.`);
+    return [];
+  }
   // --- Image Gallery Host Logic ---
   try {
     const urlObject = new URL(subredditUrl);
@@ -905,7 +1293,7 @@ async function fetchAllMediaLinks(
         },
       ];
     }
-    // Check if this is a site that benefits from yt-dlp extraction + multi-threaded download
+    // Only use yt-dlp extraction for domains in HYBRID_EXTRACTION_HOSTS
     if (HYBRID_EXTRACTION_HOSTS.some((host) => domain.includes(host))) {
       log(`[INFO] Using hybrid extraction for ${domain}`);
       // Use yt-dlp for URL extraction, then multi-threaded download
@@ -940,138 +1328,137 @@ async function fetchAllMediaLinks(
           },
         ];
       }
-    } else {
-      // Direct yt-dlp link for non-hybrid sites
-      return [
-        {
-          url: subredditUrl,
-          type: "video",
-          downloader: "ytdlp",
-          id: Date.now().toString(),
-          title: subredditUrl,
-        },
-      ];
     }
+    // If not in HYBRID_EXTRACTION_HOSTS, do NOT use yt-dlp by default
+    // Do not log or return here; allow default scraping logic to run below
   }
 
-  let allLinks = [];
-  let after = null;
-  let postCount = 0;
-  let currentPage = 1;
-  const hasPageEnd =
-    options.pageEnd > 0 && options.pageEnd >= options.pageStart;
-  const fetchOptions = {
-    headers: { "User-Agent": BROWSER_USER_AGENT, Cookie: "over18=1" },
-  };
+  // Only run the generic Reddit/post scraping logic for Reddit URLs
+  const isReddit = subredditUrl.match(/reddit\.com\//i);
+  if (isReddit) {
+    let allLinks = [];
+    let after = null;
+    let postCount = 0;
+    let currentPage = 1;
+    const hasPageEnd =
+      options.pageEnd > 0 && options.pageEnd >= options.pageStart;
+    const fetchOptions = {
+      headers: { "User-Agent": BROWSER_USER_AGENT, Cookie: "over18=1" },
+    };
 
-  log(`[INFO] Scanning for up to ${options.maxLinks || "unlimited"} links...`);
+    log(
+      `[INFO] Scanning for up to ${options.maxLinks || "unlimited"} links...`
+    );
 
-  do {
-    if (isCancelled || isSkipping) {
-      log(`[INFO] Scan for ${extractName(subredditUrl)} cancelled.`);
-      break;
-    }
-    if (options.maxLinks > 0 && allLinks.length >= options.maxLinks) {
-      log(`[INFO] Reached download limit of ${options.maxLinks}.`);
-      break;
-    }
-    if (hasPageEnd && currentPage > options.pageEnd) {
-      log(`[INFO] Reached page limit of ${options.pageEnd}.`);
-      break;
-    }
-    // This is the correct way to detect the end of a listing
-    if (currentPage > 1 && !after) {
-      log(`[INFO] No more pages available from Reddit API.`);
-      break;
-    } // --- Page Skipping Logic ---
-
-    if (currentPage < options.pageStart) {
-      const skipUrl = new URL(`${subredditUrl.replace(/\/$/, "")}.json`);
-      skipUrl.searchParams.set("limit", "25");
-      if (after) skipUrl.searchParams.set("after", after);
-
-      log(
-        `[INFO] Skipping page ${currentPage} to reach start page ${options.pageStart}...`
-      );
-      try {
-        const tempResponse = await fetch(skipUrl.toString(), fetchOptions);
-        const tempData = await tempResponse.json();
-        if (!tempData.data?.after) {
-          after = null;
-          break;
-        }
-        after = tempData.data.after;
-        currentPage++;
-        continue;
-      } catch (e) {
-        log(`[ERROR] Failed to skip page ${currentPage}. Stopping scan.`);
+    do {
+      if (isCancelled || isSkipping) {
+        log(`[INFO] Scan for ${extractName(subredditUrl)} cancelled.`);
         break;
       }
-    }
+      if (options.maxLinks > 0 && allLinks.length >= options.maxLinks) {
+        log(`[INFO] Reached download limit of ${options.maxLinks}.`);
+        break;
+      }
+      if (hasPageEnd && currentPage > options.pageEnd) {
+        log(`[INFO] Reached page limit of ${options.pageEnd}.`);
+        break;
+      }
+      // This is the correct way to detect the end of a listing
+      if (currentPage > 1 && !after) {
+        log(`[INFO] No more pages available from Reddit API.`);
+        break;
+      } // --- Page Skipping Logic ---
 
-    const url = new URL(`${subredditUrl.replace(/\/$/, "")}.json`);
-    url.searchParams.set("limit", "25");
-    url.searchParams.set("count", postCount); // Pass the total posts seen so far
-    if (after) url.searchParams.set("after", after);
+      if (currentPage < options.pageStart) {
+        const skipUrl = new URL(`${subredditUrl.replace(/\/$/, "")}.json`);
+        skipUrl.searchParams.set("limit", "25");
+        if (after) skipUrl.searchParams.set("after", after);
 
-    log(`[INFO] Fetching page ${currentPage} (API count: ${postCount})`);
-
-    try {
-      const response = await fetch(url.toString(), fetchOptions);
-      if (!response.ok) {
         log(
-          `[ERROR] Fetch failed for ${extractName(subredditUrl)}. Status: ${
-            response.status
-          }`
+          `[INFO] Skipping page ${currentPage} to reach start page ${options.pageStart}...`
         );
-        break;
-      }
-      const data = await response.json();
-      if (!data.data?.children?.length) {
-        log(`[INFO] No more posts found on this page.`);
-        break;
-      }
-      const posts = data.data.children;
-      for (const post of posts) {
-        if (options.maxLinks > 0 && allLinks.length >= options.maxLinks) {
-          after = null;
+        try {
+          const tempResponse = await fetch(skipUrl.toString(), fetchOptions);
+          const tempData = await tempResponse.json();
+          if (!tempData.data?.after) {
+            after = null;
+            break;
+          }
+          after = tempData.data.after;
+          currentPage++;
+          continue;
+        } catch (e) {
+          log(`[ERROR] Failed to skip page ${currentPage}. Stopping scan.`);
           break;
         }
-        const mediaFromPost = await extractMediaUrlsFromPost(
-          post.data,
-          log,
-          unhandledLogPath
-        );
-        allLinks.push(...mediaFromPost);
       }
 
-      postCount += posts.length; // Correctly increment the total count
-      after = data.data.after; // Get the 'after' token for the next page
-      currentPage++;
-      if (!after) {
-        log(`[INFO] Reached the end of the subreddit listing.`);
+      const url = new URL(`${subredditUrl.replace(/\/$/, "")}.json`);
+      url.searchParams.set("limit", "25");
+      url.searchParams.set("count", postCount); // Pass the total posts seen so far
+      if (after) url.searchParams.set("after", after);
+
+      log(`[INFO] Fetching page ${currentPage} (API count: ${postCount})`);
+
+      try {
+        const response = await fetch(url.toString(), fetchOptions);
+        if (!response.ok) {
+          log(
+            `[ERROR] Fetch failed for ${extractName(subredditUrl)}. Status: ${
+              response.status
+            }`
+          );
+          break;
+        }
+        const data = await response.json();
+        if (!data.data?.children?.length) {
+          log(`[INFO] No more posts found on this page.`);
+          break;
+        }
+        const posts = data.data.children;
+        for (const post of posts) {
+          if (options.maxLinks > 0 && allLinks.length >= options.maxLinks) {
+            after = null;
+            break;
+          }
+          const mediaFromPost = await extractMediaUrlsFromPost(
+            post.data,
+            log,
+            unhandledLogPath
+          );
+          allLinks.push(...mediaFromPost);
+        }
+
+        postCount += posts.length; // Correctly increment the total count
+        after = data.data.after; // Get the 'after' token for the next page
+        currentPage++;
+        if (!after) {
+          log(`[INFO] Reached the end of the subreddit listing.`);
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      } catch (error) {
+        log(
+          `[FATAL] A network error occurred while fetching ${subredditUrl}: ${error.message}`
+        );
         break;
       }
-      await new Promise((resolve) => setTimeout(resolve, 500));
-    } catch (error) {
-      log(
-        `[FATAL] A network error occurred while fetching ${subredditUrl}: ${error.message}`
-      );
-      break;
-    }
-  } while (true); // The loop is now broken internally by logic, not just the 'after' token
+    } while (true); // The loop is now broken internally by logic, not just the 'after' token
 
-  log(
-    `[INFO] Scan complete. Found ${allLinks.length} potential links after scanning ${postCount} posts.`
-  );
-  const filteredLinks = allLinks.filter(
-    (link) =>
-      (options.fileTypes.images && link.type === "image") ||
-      (options.fileTypes.gifs && link.type === "gif") ||
-      (options.fileTypes.videos && link.type === "video")
-  );
-  if (options.maxLinks > 0) return filteredLinks.slice(0, options.maxLinks);
-  return filteredLinks;
+    log(
+      `[INFO] Scan complete. Found ${allLinks.length} potential links after scanning ${postCount} posts.`
+    );
+    const filteredLinks = allLinks.filter(
+      (link) =>
+        (options.fileTypes.images && link.type === "image") ||
+        (options.fileTypes.gifs && link.type === "gif") ||
+        (options.fileTypes.videos && link.type === "video")
+    );
+    if (options.maxLinks > 0) return filteredLinks.slice(0, options.maxLinks);
+    return filteredLinks;
+  }
+  // If not Reddit and not handled above, return empty
+  return [];
 }
 
 // --- pmvhaven.com profile/favorites POST helper ---
@@ -2078,6 +2465,8 @@ async function downloadWithYtDlp(
       "--progress",
       "--concurrent-fragments",
       YTDLP_CONCURRENT_FRAGMENTS.toString(),
+      "--extractor-args",
+      "generic:impersonate=firefox_windows",
       "-o",
       outputPath,
       url,

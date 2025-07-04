@@ -95,18 +95,30 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // ===== Queue Management =====
+  function isCompletedStatus(status) {
+    return status === "completed";
+  }
+
   function renderSubreddits() {
+    //
     subredditList.innerHTML = "";
     subreddits.forEach((sub, index) => {
       const li = document.createElement("li");
-      if (sub.status === "complete") li.classList.add("item-complete");
+      //
+      const isComplete = isCompletedStatus(sub.status);
+      if (isComplete) {
+        li.classList.add("item-complete");
+        li.setAttribute("aria-disabled", "true");
+        li.style.pointerEvents = "none";
+        li.style.opacity = "0.6";
+      }
       const urlSpan = document.createElement("span");
       urlSpan.className = "item-url";
       urlSpan.textContent = sub.url;
       li.appendChild(urlSpan);
       const controlsDiv = document.createElement("div");
       controlsDiv.className = "item-controls";
-      if (sub.status === "complete") {
+      if (isComplete) {
         const checkIcon = document.createElement("div");
         checkIcon.className = "check-icon";
         checkIcon.innerHTML = CHECK_ICON_SVG;
@@ -115,10 +127,15 @@ document.addEventListener("DOMContentLoaded", () => {
       const trashIcon = document.createElement("div");
       trashIcon.className = "trash-icon";
       trashIcon.innerHTML = TRASH_ICON_SVG;
-      trashIcon.onclick = () => {
-        subreddits.splice(index, 1);
-        renderSubreddits();
-      };
+      if (!isComplete) {
+        trashIcon.onclick = () => {
+          subreddits.splice(index, 1);
+          renderSubreddits();
+        };
+      } else {
+        trashIcon.style.pointerEvents = "none";
+        trashIcon.style.opacity = "0.3";
+      }
       controlsDiv.appendChild(trashIcon);
       li.appendChild(controlsDiv);
       subredditList.appendChild(li);
@@ -192,7 +209,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   clearCompletedBtn.addEventListener("click", () => {
     const originalCount = subreddits.length;
-    subreddits = subreddits.filter((s) => s.status !== "complete");
+    subreddits = subreddits.filter((s) => s.status !== "completed");
     const removedCount = originalCount - subreddits.length;
     if (removedCount > 0) {
       addLogMessage(
@@ -274,8 +291,8 @@ document.addEventListener("DOMContentLoaded", () => {
   let contextMenu = null;
 
   function createContextMenu() {
-    const menu = document.createElement('div');
-    menu.className = 'context-menu';
+    const menu = document.createElement("div");
+    menu.className = "context-menu";
     menu.innerHTML = `
       <div class="context-menu-item" data-action="paste">
         <span>Paste</span>
@@ -288,40 +305,45 @@ document.addEventListener("DOMContentLoaded", () => {
 
   function showContextMenu(event) {
     event.preventDefault();
-    
+
     // Remove existing context menu
     if (contextMenu) {
       contextMenu.remove();
     }
-    
+
     // Create new context menu
     contextMenu = createContextMenu();
-    
+
     // Position the menu
     const x = event.clientX;
     const y = event.clientY;
-    
+
     contextMenu.style.left = `${x}px`;
     contextMenu.style.top = `${y}px`;
-    contextMenu.classList.add('show');
-    
+    contextMenu.classList.add("show");
+
     // Add click handlers
     const pasteItem = contextMenu.querySelector('[data-action="paste"]');
-    pasteItem.addEventListener('click', async () => {
+    pasteItem.addEventListener("click", async () => {
       try {
         const clipboardText = await window.api.readClipboard();
         if (clipboardText) {
           const currentValue = subredditTextArea.value;
           const cursorPosition = subredditTextArea.selectionStart;
           const beforeCursor = currentValue.substring(0, cursorPosition);
-          const afterCursor = currentValue.substring(subredditTextArea.selectionEnd);
-          
+          const afterCursor = currentValue.substring(
+            subredditTextArea.selectionEnd
+          );
+
           // Insert clipboard content at cursor position
           subredditTextArea.value = beforeCursor + clipboardText + afterCursor;
-          
+
           // Move cursor to end of pasted content
           const newCursorPosition = cursorPosition + clipboardText.length;
-          subredditTextArea.setSelectionRange(newCursorPosition, newCursorPosition);
+          subredditTextArea.setSelectionRange(
+            newCursorPosition,
+            newCursorPosition
+          );
           subredditTextArea.focus();
         }
       } catch (error) {
@@ -339,18 +361,18 @@ document.addEventListener("DOMContentLoaded", () => {
   }
 
   // Add context menu to textarea
-  subredditTextArea.addEventListener('contextmenu', showContextMenu);
-  
+  subredditTextArea.addEventListener("contextmenu", showContextMenu);
+
   // Hide context menu when clicking elsewhere
-  document.addEventListener('click', (event) => {
+  document.addEventListener("click", (event) => {
     if (contextMenu && !contextMenu.contains(event.target)) {
       hideContextMenu();
     }
   });
 
   // Hide context menu on escape key
-  document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape' && contextMenu) {
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && contextMenu) {
       hideContextMenu();
     }
   });
@@ -414,15 +436,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   window.api.onSubredditComplete((event, completedUrl) => {
-    const subToUpdate = subreddits.find((s) => s.url === completedUrl);
-    if (subToUpdate) {
-      if (autoClearToggle.checked) {
-        subreddits = subreddits.filter((s) => s.url !== completedUrl);
-      } else {
-        subToUpdate.status = "complete";
-      }
-      renderSubreddits();
-    }
+    // Do nothing here. Wait for main-queue-updated event to update UI from main process.
   });
 
   window.api.onUpdateDownloadProgress?.((event, progress) => {
@@ -434,75 +448,78 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  window.api.onUpdateNotification((event, { message, showRestart, showProgress }) => {
-    notificationMessage.textContent = message;
-    notification.classList.remove("hidden");
-    restartButton.classList.toggle("hidden", !showRestart);
-    
-    // Show progress bar if update is downloading
-    if (showProgress) {
-      updateProgressBarContainer.classList.remove("hidden");
-      updateProgressBarForeground.style.width = "0%";
-      updateProgressLabel.textContent = "Downloading update...";
-      updateProgressValue.textContent = "0%";
+  window.api.onUpdateNotification(
+    (event, { message, showRestart, showProgress }) => {
+      notificationMessage.textContent = message;
+      notification.classList.remove("hidden");
+      restartButton.classList.toggle("hidden", !showRestart);
+
+      // Show progress bar if update is downloading
+      if (showProgress) {
+        updateProgressBarContainer.classList.remove("hidden");
+        updateProgressBarForeground.style.width = "0%";
+        updateProgressLabel.textContent = "Downloading update...";
+        updateProgressValue.textContent = "0%";
+      }
+
+      // Hide progress bar if update is ready
+      if (showRestart) {
+        updateProgressBarContainer.classList.add("hidden");
+        updateProgressBarForeground.style.width = "0%";
+        updateProgressLabel.textContent = "";
+        updateProgressValue.textContent = "";
+      }
     }
-    
-    // Hide progress bar if update is ready
-    if (showRestart) {
-      updateProgressBarContainer.classList.add("hidden");
-      updateProgressBarForeground.style.width = "0%";
-      updateProgressLabel.textContent = "";
-      updateProgressValue.textContent = "";
-    }
-  });
+  );
 
   // ===== Download Queue Display =====
   function updateDownloadsDisplay(activeDownloads) {
     if (!downloadsLogArea) return;
-    
+
     if (activeDownloads.length === 0) {
-      downloadsLogArea.innerHTML = '<p class="no-downloads">No Current Downloads...</p>';
+      downloadsLogArea.innerHTML =
+        '<p class="no-downloads">No Current Downloads...</p>';
     } else {
-      const downloadsList = document.createElement('ul');
-      downloadsList.className = 'downloads-list';
-      
-      activeDownloads.forEach(download => {
-        const listItem = document.createElement('li');
-        listItem.className = 'download-item';
-        
+      const downloadsList = document.createElement("ul");
+      downloadsList.className = "downloads-list";
+
+      activeDownloads.forEach((download) => {
+        const listItem = document.createElement("li");
+        listItem.className = "download-item";
+
         // Create download name
-        const nameDiv = document.createElement('div');
-        nameDiv.className = 'download-name';
+        const nameDiv = document.createElement("div");
+        nameDiv.className = "download-name";
         nameDiv.textContent = download.name;
         listItem.appendChild(nameDiv);
-        
+
         // Create progress bar container
-        const progressContainer = document.createElement('div');
-        progressContainer.className = 'download-progress-container';
-        
+        const progressContainer = document.createElement("div");
+        progressContainer.className = "download-progress-container";
+
         // Progress bar background
-        const progressBackground = document.createElement('div');
-        progressBackground.className = 'download-progress-background';
-        
+        const progressBackground = document.createElement("div");
+        progressBackground.className = "download-progress-background";
+
         // Progress bar foreground
-        const progressForeground = document.createElement('div');
-        progressForeground.className = 'download-progress-foreground';
+        const progressForeground = document.createElement("div");
+        progressForeground.className = "download-progress-foreground";
         progressForeground.style.width = `${download.progress || 0}%`;
-        
+
         // Progress text
-        const progressText = document.createElement('div');
-        progressText.className = 'download-progress-text';
+        const progressText = document.createElement("div");
+        progressText.className = "download-progress-text";
         progressText.textContent = `${Math.round(download.progress || 0)}%`;
-        
+
         progressBackground.appendChild(progressForeground);
         progressContainer.appendChild(progressBackground);
         progressContainer.appendChild(progressText);
         listItem.appendChild(progressContainer);
-        
+
         downloadsList.appendChild(listItem);
       });
-      
-      downloadsLogArea.innerHTML = '';
+
+      downloadsLogArea.innerHTML = "";
       downloadsLogArea.appendChild(downloadsList);
     }
   }
@@ -512,6 +529,16 @@ document.addEventListener("DOMContentLoaded", () => {
     updateDownloadsDisplay(activeDownloads);
   });
 
+  // Listen for main-queue-updated from main process and update UI
+  if (window.api && window.api.on) {
+    window.api.on("main-queue-updated", (event, updatedQueue) => {
+      if (Array.isArray(updatedQueue)) {
+        subreddits = updatedQueue;
+        renderSubreddits();
+      }
+    });
+  }
+
   // ===== Initial Setup =====
   async function loadInitialSettings() {
     const savedPath = await window.api.getDownloadPath();
@@ -519,7 +546,7 @@ document.addEventListener("DOMContentLoaded", () => {
     addLogMessage(
       "[INFO] Welcome! Choose a download location, then add subreddits."
     );
-    
+
     // Initialize downloads display
     updateDownloadsDisplay([]);
   }

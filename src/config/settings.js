@@ -1,12 +1,12 @@
 // Global settings for RedditGrabber
 
 // --- Download concurrency settings ---
-const MAX_SIMULTANEOUS_DOWNLOADS = 20;
+const MAX_SIMULTANEOUS_DOWNLOADS = 8;
 const MAX_DOWNLOADS_PER_DOMAIN = {
   "motherless.com": 2,
   "reddit.com": 10,
   "heavy-r.com": 1,
-  "crazyshit.com": 10,
+  "crazyshit.com": 5,
   "hentaiera.com": 8,
   "thisvid.com": 5,
   "xhamster.com": 5,
@@ -16,6 +16,7 @@ const MAX_DOWNLOADS_PER_DOMAIN = {
   "pmvhaven.com": 5,
   "efukt.com": 5,
   "pervertium.com": 5,
+  "ashemaletube.com": 5,
   default: 1, // fallback for all other domains
 };
 
@@ -39,6 +40,7 @@ const HYBRID_EXTRACTION_HOSTS = [
   "motherless.com",
   "qosvideos.com",
   "pmvhaven.com",
+ 
 ];
 
 // --- main whitelist ---
@@ -69,6 +71,8 @@ const YTDLP_SUPPORTED_HOSTS = [
   "heavy-r.com",
   "hentaiera.com",
   "motherless.com",
+  "ashemaletube.com",
+  "luxuretv.com",
 ];
 
 // --- Hosts that should always use yt-dlp (never multi-thread) ---
@@ -76,6 +80,7 @@ const FORCE_YTDLP_ONLY_HOSTS = [
   "pornpawg.com",
   "boy18tube.com",
   "motherless.com",
+  "ashemaletube.com",
 ];
 
 // --- Hosts that require special image gallery scraping ---

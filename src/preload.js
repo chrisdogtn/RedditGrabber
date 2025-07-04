@@ -26,8 +26,28 @@ contextBridge.exposeInMainWorld("api", {
 
   // Download queue management
   getActiveDownloads: () => ipcRenderer.invoke("get-active-downloads"),
+
   onDownloadQueueUpdated: (callback) =>
     ipcRenderer.on("download-queue-updated", callback),
+
+  // Generic event bridge for all events (including main-queue-updated)
+  on: (channel, listener) => {
+    // Only allow certain channels for security
+    const validChannels = [
+      "main-queue-updated",
+      "download-queue-updated",
+      "log-update",
+      "download-progress",
+      "subreddit-complete",
+      "update-notification",
+      "queue-progress",
+      "ytdlp-progress",
+      "update-download-progress",
+    ];
+    if (validChannels.includes(channel)) {
+      ipcRenderer.on(channel, listener);
+    }
+  },
 
   // Clipboard access
   readClipboard: () => navigator.clipboard.readText(),
