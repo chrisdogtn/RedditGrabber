@@ -39,7 +39,7 @@ const HYBRID_EXTRACTION_HOSTS = [
   "crazyshit.com",
   "motherless.com",
   "qosvideos.com",
-  "pmvhaven.com",
+  "pmvhaven.com"
  
 ];
 
@@ -83,6 +83,10 @@ const FORCE_YTDLP_ONLY_HOSTS = [
   "boy18tube.com",
   "motherless.com",
   "ashemaletube.com",
+  "xhamster.com",
+  "pornhub.com",
+  "youtube.com",
+  "youtu.be",
 ];
 
 // --- Hosts that require special image gallery scraping ---

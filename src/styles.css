@@ -246,7 +246,15 @@ button.danger:hover {
   color: var(--color-primary);
   flex-shrink: 0;
 }
-
+.changelog {
+  background: var(--color-panel-background);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 16px;
+  margin-top: 24px;
+}
 .queue-actions {
   display: flex;
   gap: 12px;

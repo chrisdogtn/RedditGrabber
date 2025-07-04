@@ -1,3 +1,70 @@
+// --- Changelog content (update as needed) ---
+const APP_CHANGELOG = `
+<h2 style="color:rgb(209, 52, 52)">Phil Downloader Changelog V1.5</h2>
+<ul>
+  <li><b>2025-07-04:</b> Added support for spankbang.com and womennaked.net (image galleries, category subfolders, progress logs). Improved anti-bot bypass for video hosts. Added single-threaded download for womennaked.net images.</li>
+  <li>Added Luxuretv.com, ashemaletube.com, motherless.com, hentaiera.com</li>
+  <li>View all supported currently domains under Help > Supported Domains</li>
+</ul>
+<style>
+  ul {
+    padding-left: 20px;
+  }
+  li {
+    margin-bottom: 10px;
+  }
+</style>
+`;
+
+function showChangelogWindow() {
+  const win = new BrowserWindow({
+    width: 600,
+    height: 500,
+    title: "Changelog",
+    modal: true,
+    parent: mainWindow,
+    webPreferences: { nodeIntegration: true, contextIsolation: false },
+  });
+  win.setMenu(null);
+  win.loadURL(
+    "data:text/html;charset=utf-8," +
+      encodeURIComponent(`
+    <html><head><title>Changelog</title></head><body style="font-family:sans-serif;padding:20px;background: #111111; color: white; overflow-y: auto;">${APP_CHANGELOG}<br><div style="text-align: center;"><button style="padding: 15px 50px; border: none;background-color: #00e0c3;  color: #000;  border-radius: 8px;  cursor: pointer;  font-size: 0.9rem;  font-weight: 700;transition: background-color 0.2s, opacity 0.2s;" onclick="window.close()">Close</button></div></body></html>
+  `)
+  );
+}
+
+function showSupportedDomainsWindow() {
+  const domains = settings.YTDLP_SUPPORTED_HOSTS || [];
+  const html = `
+    <h2 style="color:rgb(209, 52, 52)">Currently Supported Domains</h2>
+    <ul>${domains.map((d) => `<li>${d}</li>`).join("")}</ul>
+    <button style="padding: 15px 50px; border: none;background-color: #00e0c3;  color: #000;  border-radius: 8px;  cursor: pointer;  font-size: 0.9rem;  font-weight: 700;transition: background-color 0.2s, opacity 0.2s;" onclick="window.close()">Close</button>
+    <style>
+  ul {
+    padding-left: 20px;
+  }
+  li {
+    margin-bottom: 10px;
+  }
+</style>
+  `;
+  const win = new BrowserWindow({
+    width: 400,
+    height: 600,
+    title: "Supported Domains",
+    modal: true,
+    parent: mainWindow,
+    webPreferences: { nodeIntegration: true, contextIsolation: false },
+  });
+  win.setMenu(null);
+  win.loadURL(
+    "data:text/html;charset=utf-8," +
+      encodeURIComponent(
+        `<html><head><title>Supported Domains</title></head><body style="font-family:sans-serif;padding:20px;background: #111111; color: white; overflow-y: auto;">${html}</body></html>`
+      )
+  );
+}
 // --- womennaked.net gallery scraper ---
 async function scrapeWomennakedGallery(galleryUrl, log) {
   try {
@@ -526,6 +593,14 @@ const menuTemplate = [
         },
       },
       {
+        label: "Show Changelog",
+        click: showChangelogWindow,
+      },
+      {
+        label: "Supported Domains",
+        click: showSupportedDomainsWindow,
+      },
+      {
         label: "Check for Updates",
         click: () => {
           appLog("[INFO] Manual update check triggered.");
@@ -614,13 +689,43 @@ autoUpdater.on("checking-for-update", () =>
 autoUpdater.on("update-not-available", (info) =>
   appLog("[Updater] You are on the latest version.")
 );
+let lastNotifiedVersion = null;
 autoUpdater.on("update-available", (info) => {
   appLog(`[Updater] Update available (v${info.version}).`);
   mainWindow.webContents.send("update-notification", {
-    message: "App update available. Downloading...",
+    message:
+      "App update available. Downloading... <a id='show-changelog' href='#'>View Changelog</a>",
     showProgress: true,
   });
+  // Listen for renderer click on changelog link
+  if (mainWindow) {
+    mainWindow.webContents
+      .executeJavaScript(
+        `
+      setTimeout(() => {
+        const el = document.getElementById('show-changelog');
+        if (el) el.onclick = function(e) { e.preventDefault(); require('electron').ipcRenderer.send('show-changelog'); };
+      }, 500);
+    `
+      )
+      .catch(() => {});
+  }
+  lastNotifiedVersion = info.version;
 });
+// Show changelog on first run after update
+app.on("ready", () => {
+  const Store = require("electron-store");
+  const store = new Store();
+  const lastVersion = store.get("lastVersion");
+  const currentVersion = app.getVersion();
+  if (lastVersion !== currentVersion) {
+    setTimeout(showChangelogWindow, 1000);
+    store.set("lastVersion", currentVersion);
+  }
+});
+
+// IPC for changelog popup from renderer
+ipcMain.on("show-changelog", showChangelogWindow);
 autoUpdater.on("download-progress", (progressObj) => {
   appLog(`[Updater] Downloading update: ${Math.round(progressObj.percent)}%`);
   if (mainWindow) {
