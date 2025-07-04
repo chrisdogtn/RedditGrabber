@@ -1,3 +1,114 @@
+// --- spankbang.com video extractor (BrowserWindow) ---
+async function extractSpankbangVideoUrl(pageUrl, log) {
+  try {
+    log(`[SPANKBANG] Extracting direct video URL from: ${pageUrl}`);
+    // Use Electron headless browser to fetch HTML (bypass anti-bot)
+    const html = await new Promise((resolve, reject) => {
+      let win = new BrowserWindow({
+        show: false,
+        webPreferences: {
+          nodeIntegration: false,
+          contextIsolation: true,
+        },
+      });
+      let finished = false;
+      win.webContents.setUserAgent(BROWSER_USER_AGENT);
+      win.webContents.session.setCertificateVerifyProc((request, callback) => {
+        callback(0);
+      });
+      win.loadURL(pageUrl);
+      win.webContents.on("did-finish-load", async () => {
+        if (finished) return;
+        try {
+          // Wait for stream_data to appear in the DOM (max 3s)
+          const pollForStreamData = async () => {
+            const maxAttempts = 30;
+            let attempt = 0;
+            while (attempt < maxAttempts) {
+              const html = await win.webContents.executeJavaScript(
+                "document.documentElement.outerHTML"
+              );
+              if (/var\\s+stream_data\\s*=\\s*{/.test(html)) return html;
+              await new Promise((r) => setTimeout(r, 100));
+              attempt++;
+            }
+            return await win.webContents.executeJavaScript(
+              "document.documentElement.outerHTML"
+            );
+          };
+          const html = await pollForStreamData();
+          finished = true;
+          win.destroy();
+          resolve(html);
+        } catch (e) {
+          if (!finished) {
+            finished = true;
+            win.destroy();
+            reject(e);
+          }
+        }
+      });
+      win.on("unresponsive", () => {
+        if (!finished) {
+          finished = true;
+          win.destroy();
+          reject(new Error("BrowserWindow became unresponsive"));
+        }
+      });
+      win.on("closed", () => {
+        if (!finished) {
+          finished = true;
+          reject(new Error("BrowserWindow closed before HTML could be retrieved"));
+        }
+      });
+      win.on("crashed", () => {
+        if (!finished) {
+          finished = true;
+          reject(new Error("BrowserWindow crashed before HTML could be retrieved"));
+        }
+      });
+    });
+    // Look for the <script> tag containing stream_data
+    const scriptMatch = html.match(/<script[^>]*>[^<]*var\s+stream_data\s*=\s*({[\s\S]*?});/);
+    if (!scriptMatch || !scriptMatch[1]) {
+      log(`[SPANKBANG] Could not find stream_data in HTML.`);
+      return null;
+    }
+    let streamData;
+    try {
+      // Replace single quotes with double quotes for JSON parsing, but only for keys/values
+      let jsonStr = scriptMatch[1]
+        .replace(/'/g, '"')
+        .replace(/,\s*}/g, '}') // Remove trailing commas
+        .replace(/,\s*]/g, ']');
+      streamData = JSON.parse(jsonStr);
+    } catch (e) {
+      log(`[SPANKBANG] Failed to parse stream_data: ${e.message}`);
+      return null;
+    }
+    // Always grab the 'main' item (array)
+    let mainArr = streamData.main;
+    if (!mainArr || !Array.isArray(mainArr) || mainArr.length === 0) {
+      log(`[SPANKBANG] No main video URL found in stream_data.`);
+      return null;
+    }
+    const videoUrl = mainArr[0];
+    // Extract title from <title>
+    const cheerio = require("cheerio");
+    const $ = cheerio.load(html);
+    let title = ($("title").text() || "").trim();
+    if (!title) title = "spankbang_video";
+    log(`[SPANKBANG] Extracted source URL: ${videoUrl}`);
+    return {
+      url: videoUrl,
+      title,
+      supportsRangeRequests: true,
+    };
+  } catch (error) {
+    log(`[SPANKBANG] Error extracting video: ${error.message}`);
+    return null;
+  }
+}
 // --- luxuretv.com video extractor ---
 async function extractLuxuretvVideoUrl(pageUrl, log) {
   try {
@@ -978,6 +1089,36 @@ async function fetchAllMediaLinks(
     const ashemaletubeMatch = subredditUrl.match(
       /^https?:\/\/(?:www\.)?ashemaletube\.com\/videos\//i
     );
+
+    // --- spankbang.com video page logic ---
+    log(`[DEBUG] fetchAllMediaLinks called with URL: ${subredditUrl}`);
+    const spankbangMatch = subredditUrl.match(
+      /^https?:\/\/(?:[a-zA-Z0-9-]+\.)?spankbang\.com\//i
+    );
+    if (spankbangMatch) {
+      log(`[INFO] Detected spankbang.com video page.`);
+      const videoInfo = await extractSpankbangVideoUrl(subredditUrl, log);
+      if (videoInfo && videoInfo.url) {
+        log(`[SPANKBANG] Successfully extracted direct video URL.`);
+        log(`[INFO] [spankbang.com] Found 1 potential file.`);
+        log(`[INFO] [spankbang.com] Scan complete.`);
+        return [
+          {
+            url: videoInfo.url,
+            type: "video",
+            downloader: "multi-thread",
+            id: Date.now().toString(),
+            title: videoInfo.title,
+            domain: "spankbang.com",
+          },
+        ];
+      } else {
+        log(`[SPANKBANG] Could not extract video URL.`);
+        log(`[INFO] [spankbang.com] Found 0 potential files.`);
+        log(`[INFO] [spankbang.com] Scan complete.`);
+        return [];
+      }
+    }
 
     // --- luxuretv.com video page logic (support all /video/ and /videos/ URLs, any subdomain) ---
     // Add debug log to see what URL is being passed

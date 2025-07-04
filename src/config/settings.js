@@ -17,7 +17,7 @@ const MAX_DOWNLOADS_PER_DOMAIN = {
   "efukt.com": 5,
   "pervertium.com": 5,
   "ashemaletube.com": 5,
-  default: 1, // fallback for all other domains
+  default: 4, // fallback for all other domains
 };
 
 // --- Hybrid extraction hosts (yt-dlp for extraction, multi-thread for download) ---
@@ -73,6 +73,7 @@ const YTDLP_SUPPORTED_HOSTS = [
   "motherless.com",
   "ashemaletube.com",
   "luxuretv.com",
+  "spankbang.com",
 ];
 
 // --- Hosts that should always use yt-dlp (never multi-thread) ---
