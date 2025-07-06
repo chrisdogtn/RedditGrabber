@@ -673,6 +673,11 @@ async function createWindow() {
       nodeIntegration: false,
     },
   });
+
+  if (isDev) {
+    mainWindow.webContents.openDevTools({ mode: "detach" });
+  }
+
   const menu = Menu.buildFromTemplate(menuTemplate);
   Menu.setApplicationMenu(menu);
   mainWindow.loadFile(path.join(__dirname, "index.html"));
