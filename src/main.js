@@ -2,9 +2,8 @@
 const APP_CHANGELOG = `
 <h2 style="color:rgb(209, 52, 52)">Phil Downloader Changelog V1.5</h2>
 <ul>
-  <li><b>2025-07-04:</b> Added support for spankbang.com and womennaked.net (image galleries, category subfolders, progress logs). Improved anti-bot bypass for video hosts. Added single-threaded download for womennaked.net images.</li>
-  <li>Added Luxuretv.com, ashemaletube.com, motherless.com, hentaiera.com</li>
-  <li>View all supported currently domains under Help > Supported Domains</li>
+  <li>Added support for nsfw.sex.</li>
+  
 </ul>
 <style>
   ul {

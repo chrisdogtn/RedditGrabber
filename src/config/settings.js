@@ -39,7 +39,8 @@ const HYBRID_EXTRACTION_HOSTS = [
   "crazyshit.com",
   "motherless.com",
   "qosvideos.com",
-  "pmvhaven.com"
+  "pmvhaven.com",
+  "nsfw.sex"
  
 ];
 
@@ -74,7 +75,8 @@ const YTDLP_SUPPORTED_HOSTS = [
   "ashemaletube.com",
   "luxuretv.com",
   "spankbang.com",
-  "womennaked.net"
+  "womennaked.net",
+  "nsfw.sex"
 ];
 
 // --- Hosts that should always use yt-dlp (never multi-thread) ---
