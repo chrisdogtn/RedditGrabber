@@ -43,6 +43,9 @@ h3 {
 .app-container {
   display: flex;
   height: 100vh;
+  min-height: 0;
+  /* Use dynamic viewport for better mobile support */
+  height: 100dvh;
 }
 
 .sidebar {
@@ -52,6 +55,7 @@ h3 {
   display: flex;
   flex-direction: column;
   flex-shrink: 0; /* Prevent sidebar from shrinking */
+  box-sizing: border-box;
 }
 
 /* highlight-start */
@@ -62,6 +66,7 @@ h3 {
   display: flex;
   flex-direction: column;
   min-width: 0; /* CRITICAL: Allows this flex item to shrink below its content's intrinsic size */
+  box-sizing: border-box;
 }
 /* highlight-end */
 
@@ -630,4 +635,62 @@ button.danger:hover {
   color: var(--color-text-secondary);
   font-size: 0.8rem;
   margin-left: 16px;
+}
+
+/* ===== Responsive Layout Fixes ===== */
+@media (max-width: 1200px) {
+  .sidebar {
+    width: 280px;
+    padding: 12px;
+  }
+  .main-content {
+    padding: 12px;
+  }
+  .app-title {
+    font-size: 1.2rem;
+    margin-bottom: 12px;
+  }
+}
+
+@media (max-width: 800px) {
+  .app-container {
+    flex-direction: column;
+    height: 100dvh;
+  }
+  .sidebar {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--color-border);
+    flex-direction: row;
+    flex-wrap: wrap;
+    padding: 8px;
+    min-width: 0;
+  }
+  .main-content {
+    padding: 8px;
+    min-width: 0;
+  }
+  .log-sections {
+    flex-direction: column;
+    gap: 8px;
+  }
+  .log-section {
+    width: 100%;
+  }
+}
+
+@media (max-height: 700px) {
+  .sidebar,
+  .main-content {
+    padding: 6px !important;
+  }
+  .app-title {
+    font-size: 1rem;
+    margin-bottom: 6px;
+  }
+  .section-title,
+  .download-section-title {
+    margin-top: 8px;
+    margin-bottom: 4px;
+  }
 }

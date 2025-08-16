@@ -1,9 +1,10 @@
 // --- Changelog content (update as needed) ---
 const APP_CHANGELOG = `
-<h2 style="color:rgb(209, 52, 52)">Phil Downloader Changelog V1.5</h2>
+<h2 style="color:rgb(209, 52, 52)">Phil Downloader Changelog V1.6.1</h2>
 <ul>
-  <li>Added support for nsfw.sex.</li>
-  
+  <li>Added support for xnxx.com & xhamster.com</li>
+  <li>Added supported domains can be clicked to open in system browser</li>
+
 </ul>
 <style>
   ul {
@@ -37,7 +38,12 @@ function showSupportedDomainsWindow() {
   const domains = settings.YTDLP_SUPPORTED_HOSTS || [];
   const html = `
     <h2 style="color:rgb(209, 52, 52)">Currently Supported Domains</h2>
-    <ul>${domains.map((d) => `<li>${d}</li>`).join("")}</ul>
+    <ul>${domains
+      .map(
+        (d) =>
+          `<li><a style="color: white;" href="https://${d}" target="_blank" rel="noopener">${d}</a></li>`
+      )
+      .join("")}</ul>
     <button style="padding: 15px 50px; border: none;background-color: #00e0c3;  color: #000;  border-radius: 8px;  cursor: pointer;  font-size: 0.9rem;  font-weight: 700;transition: background-color 0.2s, opacity 0.2s;" onclick="window.close()">Close</button>
     <style>
   ul {
@@ -60,7 +66,20 @@ function showSupportedDomainsWindow() {
   win.loadURL(
     "data:text/html;charset=utf-8," +
       encodeURIComponent(
-        `<html><head><title>Supported Domains</title></head><body style="font-family:sans-serif;padding:20px;background: #111111; color: white; overflow-y: auto;">${html}</body></html>`
+        `<html>
+          <head><title>Supported Domains</title></head>
+          <body style="font-family:sans-serif;padding:20px;background: #111111; color: white; overflow-y: auto;">
+            ${html}
+            <script>
+              document.addEventListener('click', function(e) {
+                if (e.target.tagName === 'A' && e.target.href) {
+                  e.preventDefault();
+                  require('electron').shell.openExternal(e.target.href);
+                }
+              });
+            </script>
+          </body>
+        </html>`
       )
   );
 }

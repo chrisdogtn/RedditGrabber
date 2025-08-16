@@ -17,6 +17,7 @@ const MAX_DOWNLOADS_PER_DOMAIN = {
   "efukt.com": 5,
   "pervertium.com": 5,
   "ashemaletube.com": 5,
+  "xnxx.com": 5,
   default: 4, // fallback for all other domains
 };
 
@@ -40,8 +41,7 @@ const HYBRID_EXTRACTION_HOSTS = [
   "motherless.com",
   "qosvideos.com",
   "pmvhaven.com",
-  "nsfw.sex"
- 
+  "nsfw.sex",
 ];
 
 // --- main whitelist ---
@@ -76,7 +76,7 @@ const YTDLP_SUPPORTED_HOSTS = [
   "luxuretv.com",
   "spankbang.com",
   "womennaked.net",
-  "nsfw.sex"
+  "nsfw.sex",
 ];
 
 // --- Hosts that should always use yt-dlp (never multi-thread) ---
@@ -89,6 +89,7 @@ const FORCE_YTDLP_ONLY_HOSTS = [
   "pornhub.com",
   "youtube.com",
   "youtu.be",
+  "xnxx.com",
 ];
 
 // --- Hosts that require special image gallery scraping ---
