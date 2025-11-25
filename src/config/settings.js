@@ -18,6 +18,8 @@ const MAX_DOWNLOADS_PER_DOMAIN = {
   "pervertium.com": 5,
   "ashemaletube.com": 5,
   "xnxx.com": 5,
+  "coomer.st": 3,
+  "coomer.su": 3,
   default: 4, // fallback for all other domains
 };
 

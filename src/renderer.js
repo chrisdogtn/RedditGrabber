@@ -75,6 +75,15 @@ document.addEventListener("DOMContentLoaded", () => {
       );
       if (redditMatch) return { url: redditMatch[1], type: "reddit" };
 
+      // Coomer profiles
+      if (trimmedUrl.includes("coomer.st") || trimmedUrl.includes("coomer.su")) {
+          return {
+              url: trimmedUrl,
+              type: "coomer",
+              domain: "coomer.st"
+          };
+      }
+
       // yt-dlp whitelisted domains
       try {
         const urlObj = new URL(trimmedUrl);
@@ -404,6 +413,7 @@ document.addEventListener("DOMContentLoaded", () => {
       logMessage.classList.add("log-error");
     else if (message.includes("[Auth]")) logMessage.classList.add("log-auth");
     else if (message.includes("[INFO]")) logMessage.classList.add("log-info");
+    else if (message.includes("[Coomer]")) logMessage.classList.add("log-info");
     else return;
     logMessage.textContent = message;
     logArea.appendChild(logMessage);
