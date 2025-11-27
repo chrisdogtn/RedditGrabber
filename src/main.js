@@ -1,10 +1,12 @@
 // --- Changelog content (update as needed) ---
-const APP_CHANGELOG = `
-<h2 style="color:rgb(209, 52, 52)">Phil Downloader Changelog V1.6.2</h2>
+// --- Changelog content (update as needed) ---
+function getChangelogContent() {
+  return `
+<h2 style="color:rgb(209, 52, 52)">Phil Downloader Changelog V${app.getVersion()}</h2>
 <ul>
-  <li>Added support for xnxx.com & xhamster.com</li>
-  <li>Added supported domains can be clicked to open in system browser</li>
-
+  <li>Fixed coomer file downloading</li>
+  <li>Added Coomer image support</li>
+  <li>Added Coomer to supported domains list</li>
 </ul>
 <style>
   ul {
@@ -15,6 +17,7 @@ const APP_CHANGELOG = `
   }
 </style>
 `;
+}
 
 function showChangelogWindow() {
   const win = new BrowserWindow({
@@ -29,7 +32,7 @@ function showChangelogWindow() {
   win.loadURL(
     "data:text/html;charset=utf-8," +
       encodeURIComponent(`
-    <html><head><title>Changelog</title></head><body style="font-family:sans-serif;padding:20px;background: #111111; color: white; overflow-y: auto;">${APP_CHANGELOG}<br><div style="text-align: center;"><button style="padding: 15px 50px; border: none;background-color: #00e0c3;  color: #000;  border-radius: 8px;  cursor: pointer;  font-size: 0.9rem;  font-weight: 700;transition: background-color 0.2s, opacity 0.2s;" onclick="window.close()">Close</button></div></body></html>
+    <html><head><title>Changelog</title></head><body style="font-family:sans-serif;padding:20px;background: #111111; color: white; overflow-y: auto;">${getChangelogContent()}<br><div style="text-align: center;"><button style="padding: 15px 50px; border: none;background-color: #00e0c3;  color: #000;  border-radius: 8px;  cursor: pointer;  font-size: 0.9rem;  font-weight: 700;transition: background-color 0.2s, opacity 0.2s;" onclick="window.close()">Close</button></div></body></html>
   `)
   );
 }

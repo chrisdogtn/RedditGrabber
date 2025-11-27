@@ -79,6 +79,8 @@ const YTDLP_SUPPORTED_HOSTS = [
   "spankbang.com",
   "womennaked.net",
   "nsfw.sex",
+  "coomer.st",
+  "coomer.su",
 ];
 
 // --- Hosts that should always use yt-dlp (never multi-thread) ---

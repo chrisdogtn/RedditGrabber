@@ -553,6 +553,14 @@ document.addEventListener("DOMContentLoaded", () => {
   async function loadInitialSettings() {
     const savedPath = await window.api.getDownloadPath();
     downloadPathDisplay.textContent = savedPath;
+    
+    // Set App Version
+    const version = await window.api.getAppVersion();
+    const appTitle = document.getElementById("app-title");
+    if (appTitle) {
+        appTitle.textContent = `Phil Downloader V${version}`;
+    }
+
     addLogMessage(
       "[INFO] Welcome! Choose a download location, then add subreddits."
     );

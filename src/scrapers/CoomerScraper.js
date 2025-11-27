@@ -128,12 +128,12 @@ class CoomerScraper extends ScraperBase {
             // Navigate to post
             await win.loadURL(postUrl);
             
-            // Wait for media selector (like Python: a.post__attachment-link)
+            // Wait for media selector (attachments OR fileThumbs)
             try {
                 await win.webContents.executeJavaScript(`
                     new Promise((resolve) => {
                         const check = () => {
-                            if (document.querySelector('a.post__attachment-link')) resolve();
+                            if (document.querySelector('a.post__attachment-link') || document.querySelector('.post__files')) resolve();
                             else setTimeout(check, 100);
                         };
                         setTimeout(check, 100);
@@ -142,7 +142,7 @@ class CoomerScraper extends ScraperBase {
                 `);
             } catch(e) {}
 
-            // Scrape media - STRICTLY using requested selectors
+            // Scrape media
             const mediaItems = await win.webContents.executeJavaScript(`
                 (() => {
                     const items = [];
@@ -153,11 +153,10 @@ class CoomerScraper extends ScraperBase {
                         items.push({ url, name });
                     };
 
-                    // STRICTLY "Download" links as requested by user
-                    // Python script uses: a.post__attachment-link
-                    document.querySelectorAll('a.post__attachment-link').forEach(a => {
+                    // 1. Attachments (a.post__attachment-link)
+                    const attachments = document.querySelectorAll('a.post__attachment-link');
+                    attachments.forEach(a => {
                         let name = a.getAttribute('download') || a.innerText.trim();
-                        // Clean filename from URL if needed
                         if (!name || name === 'Download') {
                             try {
                                 const urlObj = new URL(a.href);
@@ -169,13 +168,34 @@ class CoomerScraper extends ScraperBase {
                         add(a.href, name);
                     });
 
-                    return items;
+                    // 2. Images/Videos in post__files (a.fileThumb)
+                    // Using broader selector: .post__files a.fileThumb
+                    const fileThumbs = document.querySelectorAll('.post__files a.fileThumb');
+                    fileThumbs.forEach(a => {
+                        let name = a.getAttribute('download') || a.innerText.trim();
+                        if (!name) {
+                            try {
+                                const urlObj = new URL(a.href);
+                                const fParam = urlObj.searchParams.get('f');
+                                if (fParam) name = fParam;
+                                else name = urlObj.pathname.split('/').pop();
+                            } catch(e) {}
+                        }
+                        add(a.href, name);
+                    });
+
+                    return { items, debug: { attachmentCount: attachments.length, fileThumbCount: fileThumbs.length } };
                 })()
             `);
 
-            if (mediaItems && mediaItems.length > 0) {
+            const { items: foundItems, debug } = mediaItems;
+            
+            // Log debug info if no files found but elements were present (or just to trace)
+            // log(`[Coomer] Debug: Attachments=${debug.attachmentCount}, FileThumbs=${debug.fileThumbCount}`);
+
+            if (foundItems && foundItems.length > 0) {
                 let newCount = 0;
-                for (const item of mediaItems) {
+                for (const item of foundItems) {
                     if (!item.url) continue;
                     
                     let filename = item.name || 'unknown';
