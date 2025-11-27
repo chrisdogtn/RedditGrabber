@@ -649,7 +649,14 @@ async function runDownloader(options, log) {
           let extension = path.extname(urlObj.pathname);
           if (!extension) extension = ".mp4";
           const fileName = `${sanitizedTitle}_${jobToDownload.link.id}${extension}`;
-          const outputPath = path.join(jobToDownload.subredditDir, fileName);
+          
+          let downloadDir = jobToDownload.subredditDir;
+          if (jobToDownload.link.seriesFolder) {
+             downloadDir = path.join(store.get("downloadPath"), jobToDownload.link.seriesFolder);
+          }
+          await fsp.mkdir(downloadDir, { recursive: true });
+
+          const outputPath = path.join(downloadDir, fileName);
           if (fs.existsSync(outputPath)) {
             success = false;
           } else {
@@ -763,7 +770,7 @@ async function runDownloader(options, log) {
     try {
       const links = await fetchAllMediaLinks(
         jobUrl,
-        { ...options, type, domain },
+        { ...options, type, domain, isCancelled: () => isCancelled },
         log,
         unhandledLogPath
       );
