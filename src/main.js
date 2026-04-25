@@ -642,7 +642,8 @@ async function runDownloader(options, log) {
             log,
             jobToDownload.link.id,
             jobToDownload.link.title,
-            jobToDownload.link.seriesFolder
+            jobToDownload.link.seriesFolder,
+            jobToDownload.link.cookiePath
           );
         } else if (jobToDownload.link.downloader === "multi-thread") {
           const sanitizedTitle = sanitizeTitleForFilename(
@@ -942,7 +943,8 @@ async function downloadWithYtDlp(
   log,
   postId,
   postTitle,
-  seriesFolder
+  seriesFolder,
+  cookiePath
 ) {
   return new Promise((resolve) => {
     const sanitizedTitle = sanitizeTitleForFilename(postTitle);
@@ -998,10 +1000,14 @@ async function downloadWithYtDlp(
       YTDLP_CONCURRENT_FRAGMENTS.toString(),
       "--extractor-args",
       "generic:impersonate=firefox_windows",
-      "-o",
-      outputPath,
-      url,
     ];
+
+    if (cookiePath && fs.existsSync(cookiePath)) {
+        args.push("--cookies", cookiePath);
+    }
+
+    args.push("-o", outputPath, url);
+
     log(`[INFO] Starting Download: ${postTitle}`);
 
     // Add to download queue

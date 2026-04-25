@@ -2,13 +2,21 @@ const ScraperBase = require('../core/ScraperBase');
 const { BrowserWindow } = require('electron');
 const path = require('path');
 
+const COOMER_HOSTS = [
+  'coomer.st',
+  'coomer.su',
+  'official.coomer.com.co',
+  'onlyfans.coomer.com.co',
+  'site1.coomer.com.co',
+];
+
 class CoomerScraper extends ScraperBase {
   getName() {
     return 'Coomer';
   }
 
   canHandle(url) {
-    return url.includes('coomer.st') || url.includes('coomer.su');
+    return COOMER_HOSTS.some((host) => url.includes(host));
   }
 
   async scrape(url, log, options = {}) {
@@ -20,13 +28,20 @@ class CoomerScraper extends ScraperBase {
       log(`[Coomer] Starting scrape for ${url} using hidden window...`);
 
       // 1. Parse URL to get service and user
-      const match = url.match(/coomer\.(?:st|su)\/([^\/]+)\/user\/([^\/\?]+)/);
-      if (!match) {
+      const parsedUrl = new URL(url);
+      const host = parsedUrl.hostname.replace(/^www\./, '');
+      const pathParts = parsedUrl.pathname.split('/').filter(Boolean);
+      const userIndex = pathParts.indexOf('user');
+      const service = userIndex > 0
+        ? pathParts[userIndex - 1]
+        : host.endsWith('.coomer.com.co')
+        ? host.split('.')[0]
+        : null;
+      const userId = userIndex >= 0 ? pathParts[userIndex + 1] : null;
+      if (!COOMER_HOSTS.includes(host) || !service || !userId) {
         throw new Error('Invalid Coomer profile URL format. Expected: .../service/user/username');
       }
 
-      const service = match[1];
-      const userId = match[2];
       // Python script strips query params from base url
       const baseUrl = `https://coomer.st/${service}/user/${userId}`;
       log(`[Coomer] Target: Service=${service}, User=${userId}`);

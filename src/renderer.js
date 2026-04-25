@@ -63,6 +63,13 @@ document.addEventListener("DOMContentLoaded", () => {
   window.api.getYtDlpWhitelist().then((list) => {
     YTDLP_WHITELIST = list;
   });
+  const COOMER_HOSTS = [
+    "coomer.st",
+    "coomer.su",
+    "official.coomer.com.co",
+    "onlyfans.coomer.com.co",
+    "site1.coomer.com.co",
+  ];
 
   // ===== URL Processing =====
   // Accepts Reddit subreddits or whitelisted yt-dlp domains
@@ -76,7 +83,7 @@ document.addEventListener("DOMContentLoaded", () => {
       if (redditMatch) return { url: redditMatch[1], type: "reddit" };
 
       // Coomer profiles
-      if (trimmedUrl.includes("coomer.st") || trimmedUrl.includes("coomer.su")) {
+      if (COOMER_HOSTS.some((host) => trimmedUrl.includes(host))) {
           return {
               url: trimmedUrl,
               type: "coomer",

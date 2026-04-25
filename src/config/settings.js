@@ -20,6 +20,9 @@ const MAX_DOWNLOADS_PER_DOMAIN = {
   "xnxx.com": 5,
   "coomer.st": 3,
   "coomer.su": 3,
+  "official.coomer.com.co": 3,
+  "onlyfans.coomer.com.co": 3,
+  "site1.coomer.com.co": 3,
   default: 4, // fallback for all other domains
 };
 
@@ -81,6 +84,9 @@ const YTDLP_SUPPORTED_HOSTS = [
   "nsfw.sex",
   "coomer.st",
   "coomer.su",
+  "official.coomer.com.co",
+  "onlyfans.coomer.com.co",
+  "site1.coomer.com.co",
 ];
 
 // --- Hosts that should always use yt-dlp (never multi-thread) ---
