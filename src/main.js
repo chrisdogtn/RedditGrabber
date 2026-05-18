@@ -4,6 +4,8 @@ function getChangelogContent() {
   return `
 <h2 style="color:rgb(209, 52, 52)">Phil Downloader Changelog V${app.getVersion()}</h2>
 <ul>
+  <li>Fixed en.luxuretv.com video links failing to find downloadable media.</li>
+  <li>Improved LuxureTV extraction with broader player/source detection and safer yt-dlp fallback.</li>
   <li>Fixed coomer file downloading</li>
   <li>Added Coomer image support</li>
   <li>Added Coomer to supported domains list</li>
